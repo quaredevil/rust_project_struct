@@ -1,85 +1,53 @@
-# Documentação do Projeto crypto-listener
+# Project Documentation
 
-Este diretório contém toda a documentação técnica do projeto.
+This folder contains all technical documentation for the project.
 
-## Convenções de Nomenclatura
+## Available Documentation
 
-Todos os arquivos de documentação seguem padrões específicos para facilitar a organização e localização:
+- **[GETTING_STARTED.md](GETTING_STARTED.md)** - Step-by-step guide to start using this template
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Detailed architecture documentation
+- **[TEMPLATE.md](TEMPLATE.md)** - Documentation template for new features
 
-### Padrões de Nomenclatura
+## Documentation Conventions
 
-1. **Guias de Migração**: `{FEATURE}_MIGRATION.md`
-   - Exemplo: `KAFKA_TOPICS_MIGRATION.md`
-   - Propósito: Documentar processos de migração de features ou mudanças breaking
+### File Naming
 
-2. **Architecture Decision Records (ADRs)**: `ADR_{NUMBER}_{TITLE}.md`
-   - Exemplo: `ADR_001_KAFKA_AS_PRIMARY_DATASTORE.md`
-   - Propósito: Registrar decisões arquiteturais importantes com contexto e justificativa
+- All technical documentation files must be placed in the `docs/` folder
+- Use descriptive uppercase names with underscores (e.g., `FEATURE_GUIDE.md`)
+- Each significant feature, migration, or architectural decision should have its own `.md` file
+- Include date and version information in documentation when relevant
 
-3. **Guias How-To**: `HOWTO_{TOPIC}.md`
-   - Exemplo: `HOWTO_SETUP_LOCAL_DEVELOPMENT.md`
-   - Propósito: Tutoriais práticos para tarefas específicas
+### Documentation Types
 
-4. **Especificações Técnicas**: `SPEC_{FEATURE}.md`
-   - Exemplo: `SPEC_KAFKA_MESSAGE_FORMAT.md`
-   - Propósito: Especificações detalhadas de features, protocolos ou formatos
+- **Migration guides**: Follow pattern `{FEATURE}_MIGRATION.md`
+- **Architecture decision records**: Follow pattern `ADR_{NUMBER}_{TITLE}.md`
+- **How-to guides**: Follow pattern `HOWTO_{TOPIC}.md`
+- **Feature documentation**: Follow pattern `{FEATURE}_GUIDE.md`
 
-5. **Runbooks Operacionais**: `RUNBOOK_{SCENARIO}.md`
-   - Exemplo: `RUNBOOK_KAFKA_OUTAGE.md`
-   - Propósito: Procedimentos para cenários operacionais e troubleshooting
+## Writing New Documentation
 
-## Regras Gerais
+When adding new documentation:
 
-- ✅ **SEMPRE** coloque novos arquivos `.md` nesta pasta `/docs`
-- ✅ Use nomes descritivos em MAIÚSCULAS com underscores
-- ✅ Inclua data de criação e versão quando relevante
-- ✅ Mantenha o `projectmap.yaml` atualizado com novos documentos
-- ✅ Use Markdown padrão com blocos de código bem formatados
-- ✅ Adicione índice para documentos longos (>500 linhas)
+1. Copy `TEMPLATE.md` to create a new file
+2. Follow the naming conventions above
+3. Include the following sections:
+   - **Overview** - What is this about?
+   - **Context** - Why is this important?
+   - **Details** - How does it work?
+   - **Examples** - Practical usage examples
+   - **References** - Links to related documentation
 
-## Estrutura Recomendada para Documentos
+## Maintaining Documentation
 
-```markdown
-# Título do Documento
+- Keep documentation up to date with code changes
+- Add new documentation for new features
+- Archive outdated documentation (move to `docs/archive/`)
+- Review documentation quarterly
 
-**Criado:** YYYY-MM-DD  
-**Última Atualização:** YYYY-MM-DD  
-**Versão:** X.Y.Z  
-**Status:** [Draft | Review | Approved | Deprecated]
+## Getting Help
 
-## Índice
-1. [Seção 1](#seção-1)
-2. [Seção 2](#seção-2)
-...
-
-## Resumo
-Breve descrição (2-3 parágrafos)
-
-## Conteúdo Principal
-...
-
-## Referências
-- Links relevantes
-- Documentos relacionados
-```
-
-## Documentos Existentes
-
-### Migrações
-- **KAFKA_TOPICS_MIGRATION.md** - Guia de migração para novo padrão de nomenclatura de tópicos Kafka (`crypto-listener-{topic-name}`)
-
-## Contribuindo
-
-Ao adicionar nova documentação:
-
-1. Escolha o padrão de nomenclatura apropriado
-2. Crie o arquivo em `/docs`
-3. Atualize este README com uma entrada na seção apropriada
-4. Atualize o `projectmap.yaml` na seção `project.documentation.existing_files`
-
-## Manutenção
-
-- Revise documentos a cada release
-- Marque documentos obsoletos como `[DEPRECATED]` no título
-- Mova documentos deprecados para `/docs/archive/` após 6 meses
-
+If you have questions:
+1. Check `GETTING_STARTED.md` first
+2. Review `ARCHITECTURE.md` for design patterns
+3. Look at code examples in `src/`
+4. Check `projectmap.yaml` for project structure

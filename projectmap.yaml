@@ -17,100 +17,127 @@ project:
   web_framework: "Axum 0.8.6 (optional)"
   database: "PostgreSQL with SQLx"
   messaging: "Kafka (rdkafka)"
-      
-      key_files:
-        - event_store.rs: "Generic event store interface"
-        - projection_store.rs: "Generic projection store interface"
+  observability: "tracing + tracing-subscriber (structured JSON logs)"
+
+  documentation:
+    location: "docs/"
+    conventions:
+      - "All technical documentation files must be placed in the docs/ folder"
+      - "Use descriptive uppercase names with underscores (e.g., FEATURE_GUIDE.md)"
+      - "Each significant feature, migration, or architectural decision should have its own .md file"
+      - "Include date and version information in documentation when relevant"
+      - "Migration guides should follow pattern: {FEATURE}_MIGRATION.md"
+      - "Architecture decision records should follow pattern: ADR_{NUMBER}_{TITLE}.md"
+      - "How-to guides should follow pattern: HOWTO_{TOPIC}.md"
+
+naming_style: snake_case
+
 application:
-          files:
-            - mod.rs
-      purpose: "Data Transfer Objects for API contracts and layer boundaries"
-      note: "Add your domain-specific DTOs here"
-
-    - name: dtos
-      path: src/application/dtos
-      purpose: "Application service orchestrators for use cases"
-            - SubscribeCommand
-            - UnsubscribeCommand
-
-      purpose: "Query handlers for read operations (CQRS pattern)"
-    - name: services
-      path: src/application/services
-      purpose: "Application service orchestrators (currently empty, reserved for future use cases)"
-
-      directories:
-
-  interactions:
-    - from: application.ports
-      to: infrastructure.messaging
-    and domain events. No infrastructure dependencies.
-      data_format: rust_types
-
-  glossary_refs:
-    - term: Port
-      relevance: "Defines interface contracts between application and infrastructure"
-      usage_locations:
-      purpose: "Domain aggregates (aggregate roots)"
-
-  quality:
-    test_coverage: unknown
-      purpose: "Domain entities"
+  description: |
+    Application layer orchestrates use cases, defines port contracts (traits),
+    and provides DTOs for cross-layer communication. This layer is pure business
+    logic coordination without infrastructure knowledge.
 
   naming_style: snake_case
 
+  modules:
+    - name: ports
+      path: src/application/ports
+      purpose: "Port trait definitions (hexagonal architecture contracts)"
+
+      key_files:
+        - event_store.rs: "Generic event store interface"
+        - projection_store.rs: "Generic projection store interface"
+
+    - name: dtos
+      path: src/application/dtos
+      purpose: "Data Transfer Objects for API contracts and layer boundaries"
+      note: "Add your domain-specific DTOs here"
+
+    - name: services
+      path: src/application/services
+      purpose: "Application service orchestrators for use cases"
+
+    - name: queries
+      path: src/application/queries
+      purpose: "Query handlers for read operations (CQRS pattern)"
+
+  conventions:
+    - "All ports are async traits with Send + Sync bounds"
+    - "Port methods return InfraResult<T> for infrastructure errors"
+    - "DTOs use serde Serialize/Deserialize for JSON compatibility"
+
+domain:
+  description: |
+    Domain layer contains pure business logic, aggregates, entities, value objects,
+    and domain events. No infrastructure dependencies.
+
+  naming_style: snake_case
+
+  modules:
+    - name: aggregates
+      path: src/domain/aggregates
+      purpose: "Domain aggregates (aggregate roots)"
+
+    - name: entities
+      path: src/domain/entities
+      purpose: "Domain entities"
+
+    - name: events
+      path: src/domain/events
       purpose: "Domain events"
 
-      complexity: low
-      lines_of_code: 10
+    - name: value_objects
+      path: src/domain/value_objects
       purpose: "Immutable value objects"
-    - name: entities
+
     - name: repositories
       path: src/domain/repositories
       purpose: "Repository interface definitions"
 
-      complexity: low
-      lines_of_code: 10
+    - name: errors
+      path: src/domain/errors.rs
+      purpose: "Domain-level error types"
 
-    - name: events
-        internal: []
-        external: []
-      lines_of_code: 10
-
+  conventions:
+    - "Domain layer has zero infrastructure dependencies"
     - "Use thiserror for domain error definitions"
 
+infrastructure:
+  description: |
     Infrastructure layer implements adapters for external systems (Kafka, PostgreSQL, HTTP).
     Contains all I/O and framework-specific code. Provides bootstrap, startup, and shutdown
     modules for application lifecycle management.
-  glossary_refs:
-    - term: Aggregate
-      relevance: "DDD aggregate root pattern for consistency boundaries"
-      usage_locations: []
-    - term: DomainEvent
-      relevance: "Represents facts that happened in the domain"
+
+  naming_style: snake_case
+
+  modules:
+    - name: bootstrap
+      path: src/infrastructure/bootstrap
       purpose: "Component initialization with retry logic and fallbacks"
       
       key_files:
         - database.rs: "PostgreSQL connection bootstrapping with retry"
-    cohesion: medium
 
-      complexity: medium
+    - name: startup
+      path: src/infrastructure/startup
       purpose: "Application startup configuration and logging"
       
       key_files:
         - logging.rs: "Structured logging initialization"
         - banner.rs: "Startup banner with health status"
         - health.rs: "Health check aggregation"
-          behavior: "Logs warnings on retry, continues without DB if all attempts fail"
-            - StartupBanner
-            - HealthSummary
+
+    - name: shutdown
+      path: src/infrastructure/shutdown
       purpose: "Graceful shutdown coordination"
       
       key_files:
         - signal_handler.rs: "OS signal handling (SIGTERM, SIGINT)"
         - graceful.rs: "Sequential shutdown with timeouts"
 
-
-      exports:
+    - name: messaging
+      path: src/infrastructure/messaging
       purpose: "Kafka infrastructure"
       
       subdirectories:
@@ -118,95 +145,82 @@ application:
         - kafka/consumers/: "Generic Kafka consumers"
         - kafka/common.rs: "Serialization and common types"
         - kafka/config.rs: "Kafka configuration"
-            - Metrics
+
     - name: repositories
       path: src/infrastructure/repositories
       purpose: "Repository implementations"
       
       key_files:
         - base_repository.rs: "Generic repository trait and PostgreSQL base"
-          - rdkafka
-            - Resets counter to 0 on successful connection
-            - Logs each retry attempt with current attempt number and max attempts
+
+    - name: config
+      path: src/infrastructure/config
       purpose: "Configuration management"
       
       key_files:
         - settings.rs: "Application settings with environment support"
-            - postgres_market_state_store.rs
+
     - name: event_store
       path: src/infrastructure/event_store
       purpose: "Event store implementations"
       
       key_files:
         - in_memory_event_store.rs: "In-memory event store for testing"
-        types:
-          files:
-            - mod.rs
-            - settings.rs
-          key_types:
-            - Settings
-            - TopicsConfig
 
-    - "Bootstrap modules handle all initialization with retry logic"
-
-      exports:
-          - TopicsConfig
-
-      complexity: low
-      lines_of_code: 220
-        - "Support for multiple Kafka topics with naming pattern: crypto-listener-{topic-name}"
-        - "Support for multiple Kafka producers/consumers"
-      usage: "Batching decorator adds buffering logic for Kafka publishing"
+  conventions:
+    - "All infrastructure types implement application ports (traits)"
+    - "Use Arc<Self> for shared ownership across async tasks"
+    - "Graceful shutdown hooks via shutdown() method on ports"
+    - "Health checks return InfraResult for readiness probes"
+    - "Generic Kafka producers/consumers use type parameters for message types"
     - "Pluggable serialization via MessageSerializer/MessageDeserializer traits"
-    - "Multiple producers/consumers configured via HashMap in Settings"
-    - "Kafka configs stored in Settings with named keys (e.g., kafka_producers.prices)"
+    - "Bootstrap modules handle all initialization with retry logic"
+    - "Startup modules provide observability and user feedback"
+    - "Shutdown modules ensure graceful resource cleanup"
+
+  patterns:
+    - pattern: Adapter Pattern
       usage: "Infrastructure types adapt external systems to port interfaces"
-      examples:
-        - binance_stream.rs
+
+    - pattern: Decorator Pattern
+      usage: "Batching decorator adds buffering logic for high-throughput scenarios"
+
+    - pattern: Generic Programming
+      usage: "Type-safe Kafka producers/consumers for any message type"
+
+    - pattern: Builder Pattern
+      usage: "Fluent component initialization in bootstrap modules"
 
 shared:
   description: |
     Shared layer contains common utilities, traits, types, and error definitions
     used across all layers.
-    - from: infrastructure.messaging.kafka_price_publisher
+
   modules:
     - errors.rs: "Common error types (InfraError, DomainError)"
     - types.rs: "Common type aliases"
     - traits/: "Common trait definitions"
     - utils/: "Utility functions"
-      to: infrastructure.messaging
+
   conventions:
     - "Keep shared layer minimal"
     - "Only truly cross-cutting concerns belong here"
-      note: "Removed price persistence to database - Kafka is the single source of truth for price updates"
-      priority: high
-    - category: future
-      note: "Add circuit breaker for Binance WebSocket reconnection logic"
-      priority: medium
-    - category: security
-      note: "WebSocket connections use TLS (rustls-tls-native-roots)"
-      priority: low
-    - category: architecture
-      note: "Bootstrap, startup, and shutdown modules follow single responsibility principle"
-      priority: high
-    - category: resilience
-      note: "NoopMarketStream fallback prevents application crash when WebSocket unavailable"
-      priority: high
-    - category: operations
-      note: "Startup banner provides immediate visibility into component health"
-      priority: high
-    - category: reliability
-      note: "Graceful shutdown with flush prevents data loss during restarts"
-      priority: high
-    - category: naming
-      note: "All Kafka topics follow pattern crypto-listener-{topic-name} for namespace isolation"
-      priority: high
-    - category: configuration
-      note: "Multiple topics supported via KAFKA_TOPIC_* environment variables and TopicsConfig struct"
-      priority: high
 
-  quality:
-    test_coverage: unknown
-    cyclomatic_complexity: medium
-    coupling: moderate
-    cohesion: high
+best_practices:
+  - category: architecture
+    note: "Bootstrap, startup, and shutdown modules follow single responsibility principle"
+    priority: high
+
+  - category: configuration
+    note: "Multiple Kafka topics/producers/consumers supported via Settings HashMap"
+    priority: high
+
+  - category: naming
+    note: "Follow consistent naming pattern for Kafka topics (e.g., {app-name}-{topic-name})"
+    priority: medium
+
+quality:
+  test_coverage: unknown
+  cyclomatic_complexity: medium
+  coupling: moderate
+  cohesion: high
