@@ -1,0 +1,212 @@
+---
+project:
+  name: project-struct-base
+  language: Rust
+  edition: "2021"
+  architecture_style: "Hexagonal (Ports & Adapters)"
+  description: |
+    Generic Rust project template with hexagonal architecture.
+    Provides base infrastructure for Kafka producers/consumers, PostgreSQL repositories,
+    and clean architecture patterns. Ready to be customized for specific domains.
+
+  features:
+    default: []
+    optional: []
+
+  runtime: "Tokio async (full features)"
+  web_framework: "Axum 0.8.6 (optional)"
+  database: "PostgreSQL with SQLx"
+  messaging: "Kafka (rdkafka)"
+      
+      key_files:
+        - event_store.rs: "Generic event store interface"
+        - projection_store.rs: "Generic projection store interface"
+application:
+          files:
+            - mod.rs
+      purpose: "Data Transfer Objects for API contracts and layer boundaries"
+      note: "Add your domain-specific DTOs here"
+
+    - name: dtos
+      path: src/application/dtos
+      purpose: "Application service orchestrators for use cases"
+            - SubscribeCommand
+            - UnsubscribeCommand
+
+      purpose: "Query handlers for read operations (CQRS pattern)"
+    - name: services
+      path: src/application/services
+      purpose: "Application service orchestrators (currently empty, reserved for future use cases)"
+
+      directories:
+
+  interactions:
+    - from: application.ports
+      to: infrastructure.messaging
+    and domain events. No infrastructure dependencies.
+      data_format: rust_types
+
+  glossary_refs:
+    - term: Port
+      relevance: "Defines interface contracts between application and infrastructure"
+      usage_locations:
+      purpose: "Domain aggregates (aggregate roots)"
+
+  quality:
+    test_coverage: unknown
+      purpose: "Domain entities"
+
+  naming_style: snake_case
+
+      purpose: "Domain events"
+
+      complexity: low
+      lines_of_code: 10
+      purpose: "Immutable value objects"
+    - name: entities
+    - name: repositories
+      path: src/domain/repositories
+      purpose: "Repository interface definitions"
+
+      complexity: low
+      lines_of_code: 10
+
+    - name: events
+        internal: []
+        external: []
+      lines_of_code: 10
+
+    - "Use thiserror for domain error definitions"
+
+    Infrastructure layer implements adapters for external systems (Kafka, PostgreSQL, HTTP).
+    Contains all I/O and framework-specific code. Provides bootstrap, startup, and shutdown
+    modules for application lifecycle management.
+  glossary_refs:
+    - term: Aggregate
+      relevance: "DDD aggregate root pattern for consistency boundaries"
+      usage_locations: []
+    - term: DomainEvent
+      relevance: "Represents facts that happened in the domain"
+      purpose: "Component initialization with retry logic and fallbacks"
+      
+      key_files:
+        - database.rs: "PostgreSQL connection bootstrapping with retry"
+    cohesion: medium
+
+      complexity: medium
+      purpose: "Application startup configuration and logging"
+      
+      key_files:
+        - logging.rs: "Structured logging initialization"
+        - banner.rs: "Startup banner with health status"
+        - health.rs: "Health check aggregation"
+          behavior: "Logs warnings on retry, continues without DB if all attempts fail"
+            - StartupBanner
+            - HealthSummary
+      purpose: "Graceful shutdown coordination"
+      
+      key_files:
+        - signal_handler.rs: "OS signal handling (SIGTERM, SIGINT)"
+        - graceful.rs: "Sequential shutdown with timeouts"
+
+
+      exports:
+      purpose: "Kafka infrastructure"
+      
+      subdirectories:
+        - kafka/producers/: "Generic Kafka producers"
+        - kafka/consumers/: "Generic Kafka consumers"
+        - kafka/common.rs: "Serialization and common types"
+        - kafka/config.rs: "Kafka configuration"
+            - Metrics
+    - name: repositories
+      path: src/infrastructure/repositories
+      purpose: "Repository implementations"
+      
+      key_files:
+        - base_repository.rs: "Generic repository trait and PostgreSQL base"
+          - rdkafka
+            - Resets counter to 0 on successful connection
+            - Logs each retry attempt with current attempt number and max attempts
+      purpose: "Configuration management"
+      
+      key_files:
+        - settings.rs: "Application settings with environment support"
+            - postgres_market_state_store.rs
+    - name: event_store
+      path: src/infrastructure/event_store
+      purpose: "Event store implementations"
+      
+      key_files:
+        - in_memory_event_store.rs: "In-memory event store for testing"
+        types:
+          files:
+            - mod.rs
+            - settings.rs
+          key_types:
+            - Settings
+            - TopicsConfig
+
+    - "Bootstrap modules handle all initialization with retry logic"
+
+      exports:
+          - TopicsConfig
+
+      complexity: low
+      lines_of_code: 220
+        - "Support for multiple Kafka topics with naming pattern: crypto-listener-{topic-name}"
+        - "Support for multiple Kafka producers/consumers"
+      usage: "Batching decorator adds buffering logic for Kafka publishing"
+    - "Pluggable serialization via MessageSerializer/MessageDeserializer traits"
+    - "Multiple producers/consumers configured via HashMap in Settings"
+    - "Kafka configs stored in Settings with named keys (e.g., kafka_producers.prices)"
+      usage: "Infrastructure types adapt external systems to port interfaces"
+      examples:
+        - binance_stream.rs
+
+shared:
+  description: |
+    Shared layer contains common utilities, traits, types, and error definitions
+    used across all layers.
+    - from: infrastructure.messaging.kafka_price_publisher
+  modules:
+    - errors.rs: "Common error types (InfraError, DomainError)"
+    - types.rs: "Common type aliases"
+    - traits/: "Common trait definitions"
+    - utils/: "Utility functions"
+      to: infrastructure.messaging
+  conventions:
+    - "Keep shared layer minimal"
+    - "Only truly cross-cutting concerns belong here"
+      note: "Removed price persistence to database - Kafka is the single source of truth for price updates"
+      priority: high
+    - category: future
+      note: "Add circuit breaker for Binance WebSocket reconnection logic"
+      priority: medium
+    - category: security
+      note: "WebSocket connections use TLS (rustls-tls-native-roots)"
+      priority: low
+    - category: architecture
+      note: "Bootstrap, startup, and shutdown modules follow single responsibility principle"
+      priority: high
+    - category: resilience
+      note: "NoopMarketStream fallback prevents application crash when WebSocket unavailable"
+      priority: high
+    - category: operations
+      note: "Startup banner provides immediate visibility into component health"
+      priority: high
+    - category: reliability
+      note: "Graceful shutdown with flush prevents data loss during restarts"
+      priority: high
+    - category: naming
+      note: "All Kafka topics follow pattern crypto-listener-{topic-name} for namespace isolation"
+      priority: high
+    - category: configuration
+      note: "Multiple topics supported via KAFKA_TOPIC_* environment variables and TopicsConfig struct"
+      priority: high
+
+  quality:
+    test_coverage: unknown
+    cyclomatic_complexity: medium
+    coupling: moderate
+    cohesion: high

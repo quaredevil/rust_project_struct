@@ -1,0 +1,50 @@
+# Diretório de build do Rust
+target/
+**/target/
+
+# Arquivos de desenvolvimento
+.git/
+.gitignore
+.env
+.env.*
+*.log
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Documentação
+README.md
+docs/
+*.md
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Testes
+tests/
+**/tests/
+
+# Scripts que não são necessários no build
+scripts/db_collation_maint.sh
+scripts/flyway_repair.sh
+
+# Schemas avsc se não forem usados no runtime
+schemas/
+
+# Makefile
+Makefile
+
+# Project map
+projectmap.yaml
+

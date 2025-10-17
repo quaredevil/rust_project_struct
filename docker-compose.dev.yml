@@ -1,0 +1,145 @@
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg17
+    command: ["postgres", "-c", "shared_preload_libraries=timescaledb"]
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: listener
+      # Opcional: ajustes automáticos de performance do TimescaleDB
+      TIMESCALEDB_TELEMETRY: "off"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  flyway:
+    image: flyway/flyway:latest
+    command: -connectRetries=20 migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/listener
+      FLYWAY_USER: postgres
+      FLYWAY_PASSWORD: postgres
+      FLYWAY_SCHEMAS: public
+    volumes:
+      - ./migrations:/flyway/sql:ro
+    restart: "no"
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    environment:
+      # KRaft requires a cluster id to be provided. Provide a stable UUID here so the container can start.
+      CLUSTER_ID: "OY7lkGCxTwKNTu68u2dAZw"
+      KAFKA_CLUSTER_ID: "OY7lkGCxTwKNTu68u2dAZw"
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # Listen on container interfaces for internal traffic and an additional external listener
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:19092
+      # Advertise internal hostname for other containers and an external address for host clients
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:19092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Map listener names to protocols
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: -Xmx512m -Xms512m
+    ports:
+      - "9092:9092"
+      - "19092:19092"
+    healthcheck:
+      test: ["CMD-SHELL", "cub kafka-ready -b localhost:19092 1 20 && echo 'Kafka is ready' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.1
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./schemas:/schemas:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/subjects > /dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    ports:
+      - "8082:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+  schema-registry-init:
+    image: python:3.11-slim
+    depends_on:
+      schema-registry:
+        condition: service_healthy
+    volumes:
+      - ./schemas:/schemas:ro
+    entrypoint: ["sh","-c"]
+    command: >
+      python - <<'PY'
+      import time, os, json, urllib.request
+      url = "http://schema-registry:8081"
+      for _ in range(60):
+          try:
+              urllib.request.urlopen(url + "/subjects")
+              break
+          except Exception:
+              time.sleep(1)
+      for fname in os.listdir('/schemas'):
+          if not fname.endswith('.avsc'):
+              continue
+          subj = os.path.splitext(fname)[0]
+          with open('/schemas/' + fname, 'r') as f:
+              s = f.read()
+          data = json.dumps({"schema": s})
+          req = urllib.request.Request(url + f"/subjects/{subj}-value/versions", data=data.encode('utf-8'), headers={'Content-Type':'application/vnd.schemaregistry.v1+json'})
+          try:
+              resp = urllib.request.urlopen(req)
+              print(fname, '->', resp.read().decode('utf-8'))
+          except Exception as e:
+              print('error registering', fname, e)
+      PY
+volumes:
+  pgdata: {}

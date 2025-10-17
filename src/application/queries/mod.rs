@@ -1,0 +1,2 @@
+// Queries module - intentionally empty
+

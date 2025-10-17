@@ -1,0 +1,47 @@
+# Rust
+target/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.swp
+
+# Build artifacts
+build/
+dist/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Coverage reports
+coverage/
+*.profraw
+
+# Documentation builds
+book/
+
+# Backup files
+*.bak
+*.backup
+
+# Vim swap files
+*.swo
+
+# Emacs backup files
+*~
+
+# Cargo.lock is typically committed for applications, but not for libraries
+# Uncomment the next line if this is a library
+# Cargo.lock
