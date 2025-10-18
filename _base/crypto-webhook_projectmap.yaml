@@ -1,0 +1,1504 @@
+# ════════════════════════════════════════════════════════════════
+# CRYPTO-WEBHOOK - PROJECT MAP
+# ════════════════════════════════════════════════════════════════
+# Sistema de recepção e normalização de webhooks externos para trading
+# Linguagem: Rust
+# Versão: 1.0.0
+# ════════════════════════════════════════════════════════════════
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 1. OVERVIEW DO PROJETO                                      │
+# └─────────────────────────────────────────────────────────────┘
+
+project:
+  name: crypto-webhook
+  description: |
+    Serviço responsável por receber webhooks de fontes externas (TradingView,
+    Discord bots, alerts customizados), validar autenticidade, normalizar
+    payloads para formato padrão e publicar como sinais de trading.
+    
+    Características principais:
+    - API HTTP para receber webhooks de múltiplas fontes
+    - Autenticação multi-método (token, HMAC, IP whitelist)
+    - Validação de schemas por fonte
+    - Normalização de payloads heterogêneos
+    - Rate limiting por fonte
+    - Replay prevention (idempotência)
+    - Publicação em Kafka (signals.buy/sell)
+    - Métricas e auditoria completa
+    - Suporte a custom sources (extensível)
+
+  language: Rust
+  async_runtime: tokio
+  web_framework: axum
+  message_broker: Kafka (rdkafka)
+  
+  responsibilities:
+    - Expor endpoints HTTP para receber webhooks
+    - Autenticar e autorizar requisições
+    - Validar schemas de payload
+    - Normalizar dados para formato padrão de sinal
+    - Aplicar rate limiting por fonte
+    - Prevenir replay attacks
+    - Enriquecer sinais com metadados
+    - Publicar sinais em tópicos Kafka
+    - Manter histórico de webhooks recebidos
+    - Prover métricas de recepção e validação
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 2. ARQUITETURA                                               │
+# └─────────────────────────────────────────────────────────────┘
+
+architecture:
+  pattern: Event-Driven + Hexagonal Architecture + Plugin System
+  
+  components:
+    http_server:
+      description: Servidor HTTP para receber webhooks
+      technology: Axum (async web framework)
+      features:
+        - Routing por fonte (/webhook/tradingview, /webhook/custom)
+        - Middlewares (auth, rate limit, logging)
+        - Timeout configurável
+        
+    authenticator:
+      description: Valida autenticidade das requisições
+      methods:
+        - Token-based (Bearer token)
+        - HMAC signature (SHA256)
+        - IP whitelist
+        - API key
+      extensible: true
+      
+    schema_validator:
+      description: Valida schemas de payload
+      technology: JSON Schema ou serde
+      per_source: true
+      
+    normalizer:
+      description: Normaliza payloads heterogêneos
+      strategy: Plugin-based (trait NormalizeWebhook)
+      implementations:
+        - TradingViewNormalizer
+        - DiscordBotNormalizer
+        - CustomAlertNormalizer
+        - GenericNormalizer
+        
+    rate_limiter:
+      description: Aplica rate limiting por fonte
+      strategy: Token bucket + sliding window
+      storage: Redis
+      granularity: Por fonte + por IP
+      
+    replay_detector:
+      description: Detecta e previne replay attacks
+      strategy: Request signature cache (Redis)
+      window: 5 minutos
+      
+    signal_enricher:
+      description: Enriquece sinais com metadados
+      additions:
+        - Source information
+        - Timestamp de recepção
+        - Webhook ID único
+        - IP de origem (opcional)
+        
+    signal_publisher:
+      description: Publica sinais no Kafka
+      technology: rdkafka
+      topics: [signals.buy, signals.sell]
+      
+    webhook_store:
+      description: Armazena histórico de webhooks
+      technology: Postgres
+      retention: 30 dias (configurável)
+      
+    metrics:
+      description: Coleta métricas
+      technology: Prometheus (rust-prometheus)
+      
+  data_flow: |
+    HTTP Request → Authenticator → Rate Limiter → Replay Detector → 
+    Schema Validator → Normalizer → Signal Enricher → Signal Publisher → Kafka
+                                       ↓
+                                 Webhook Store (audit)
+                                       ↓
+                                    Metrics
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 3. TÓPICOS KAFKA                                             │
+# └─────────────────────────────────────────────────────────────┘
+
+kafka_topics:
+  produced:
+    - name: signals.buy
+      description: Sinais de compra normalizados de fontes externas
+      consumers:
+        - crypto-trader
+        - crypto-management
+        
+      schema:
+        symbol:
+          type: string
+          description: Par de negociação (ex: BTCUSDT)
+          
+        strategy:
+          type: string
+          description: Nome da estratégia (mapeado da fonte)
+          pattern: "^EXTERNAL_[A-Z_]+$"
+          examples: ["EXTERNAL_MA_CROSS", "EXTERNAL_RSI_DIVERGENCE"]
+          
+        source:
+          type: string
+          description: Fonte do webhook
+          enum: [tradingview, discord_bot, custom, generic]
+          
+        confidence:
+          type: number
+          description: Nível de confiança (configurável por fonte)
+          range: [0.0, 1.0]
+          default: 0.8
+          
+        target_price:
+          type: number
+          description: Preço atual/sugerido de entrada
+          
+        stop_loss:
+          type: number
+          optional: true
+          description: Stop loss sugerido
+          
+        take_profit:
+          type: number
+          optional: true
+          description: Take profit sugerido
+          
+        quantity:
+          type: number
+          optional: true
+          description: Quantidade sugerida
+          
+        metadata:
+          type: object
+          description: Metadados adicionais
+          fields:
+            webhook_id: UUID único do webhook
+            source_strategy: Nome original da estratégia na fonte
+            received_at: Timestamp de recepção
+            original_payload: Payload original (opcional, debug)
+            ip_address: IP de origem (opcional)
+            alert_id: ID do alert na fonte (se disponível)
+          
+        timestamp:
+          type: string
+          format: ISO8601
+          description: Timestamp do sinal (da fonte ou de recepção)
+          
+      example_payload: |
+        {
+          "symbol": "BTCUSDT",
+          "strategy": "EXTERNAL_MA_CROSSOVER",
+          "source": "tradingview",
+          "confidence": 0.85,
+          "target_price": 45123.50,
+          "stop_loss": 44000.00,
+          "take_profit": 47000.00,
+          "metadata": {
+            "webhook_id": "550e8400-e29b-41d4-a716-446655440000",
+            "source_strategy": "MA Crossover Alert",
+            "received_at": "2025-10-16T22:00:00Z",
+            "alert_id": "tv_123456"
+          },
+          "timestamp": "2025-10-16T22:00:00Z"
+        }
+
+    - name: signals.sell
+      description: Sinais de venda
+      schema: Similar ao signals.buy
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 4. MAPA DE PASTAS                                            │
+# └─────────────────────────────────────────────────────────────┘
+
+project_structure:
+  description: Estrutura completa do projeto com descrição de cada módulo
+  architecture_layers: |
+    Presentation → Application → Domain
+                       ↓
+                Infrastructure
+    
+    - Domain: não depende de ninguém (núcleo puro)
+    - Application: depende apenas de Domain
+    - Infrastructure: implementa contratos de Application
+    - Presentation: usa Application e injeta Infrastructure via DI
+    
+  structure: |
+    crypto-webhook/
+    ├── src/
+    │   ├── main.rs                          # Entry point: bootstrap do app (config, HTTP server, publisher)
+    │   ├── lib.rs                           # Biblioteca pública expondo módulos principais
+    │   │
+    │   ├── domain/                          # ⭐ Camada de Domínio (regras de negócio puras, sem I/O)
+    │   │   ├── mod.rs
+    │   │   ├── errors.rs                    # Erros de domínio (ValidationError, UnauthorizedError)
+    │   │   ├── aggregates/                  # Agregados DDD
+    │   │   │   ├── mod.rs
+    │   │   │   ├── webhook.rs               # WebhookAggregate (valida, normaliza, aplica eventos)
+    │   │   │   ├── source.rs                # SourceAggregate (gerencia fonte autorizada)
+    │   │   │   └── signal.rs                # SignalAggregate (valida sinal normalizado)
+    │   │   ├── entities/                    # Entidades de domínio
+    │   │   │   ├── mod.rs
+    │   │   │   ├── webhook.rs               # Entidade Webhook
+    │   │   │   ├── signal.rs                # Entidade Signal
+    │   │   │   └── source_config.rs         # Entidade SourceConfig (configuração de fonte)
+    │   │   ├── events/                      # Domain events
+    │   │   │   ├── mod.rs
+    │   │   │   ├── webhook_events.rs        # WebhookReceived, WebhookValidated, WebhookRejected
+    │   │   │   ├── signal_events.rs         # SignalNormalized, SignalPublished
+    │   │   │   └── source_events.rs         # SourceRegistered, SourceDisabled
+    │   │   ├── repositories/                # Traits de repositórios (contratos)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── webhook_repository.rs    # Contrato para persistir webhooks
+    │   │   │   └── source_repository.rs     # Contrato para gerenciar fontes
+    │   │   ├── services/                    # Serviços de domínio
+    │   │   │   ├── mod.rs
+    │   │   │   ├── webhook_validator.rs     # Valida webhook (schema, regras de negócio)
+    │   │   │   ├── signal_normalizer.rs     # Normaliza payloads para formato padrão
+    │   │   │   ├── signature_validator.rs   # Valida assinaturas HMAC
+    │   │   │   └── confidence_calculator.rs # Calcula confidence baseado na fonte
+    │   │   └── value_objects/               # Value objects
+    │   │       ├── mod.rs
+    │   │       ├── webhook_id.rs            # VO WebhookId (UUID)
+    │   │       ├── source_name.rs           # VO SourceName (tradingview, custom, etc.)
+    │   │       ├── signature.rs             # VO Signature (HMAC SHA256)
+    │   │       ├── confidence.rs            # VO Confidence (0.0 a 1.0)
+    │   │       ├── symbol.rs                # VO Symbol (validação)
+    │   │       └── alert_id.rs              # VO AlertId (ID da fonte)
+    │   │
+    │   ├── application/                     # ⭐ Camada de Aplicação (casos de uso, orquestração)
+    │   │   ├── mod.rs
+    │   │   ├── dtos/                        # Data Transfer Objects
+    │   │   │   ├── mod.rs
+    │   │   │   ├── commands.rs              # Command DTOs (ProcessWebhookCommand)
+    │   │   │   ├── webhook_dto.rs           # DTO para webhooks
+    │   │   │   ├── signal_dto.rs            # DTO para sinais normalizados
+    │   │   │   ├── requests.rs              # HTTP request DTOs (por fonte)
+    │   │   │   └── responses.rs             # HTTP response DTOs
+    │   │   ├── ports/                       # ⚡ Ports (interfaces/contratos para adapters)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── webhook_receiver_port.rs # Contrato para receber webhooks (HTTP)
+    │   │   │   ├── signal_publisher_port.rs # Contrato para publicar sinais (Kafka)
+    │   │   │   ├── webhook_store_port.rs    # Contrato para persistir webhooks
+    │   │   │   ├── source_store_port.rs     # Contrato para gerenciar fontes
+    │   │   │   ├── rate_limiter_port.rs     # Contrato para rate limiting
+    │   │   │   └── replay_detector_port.rs  # Contrato para detectar replay
+    │   │   ├── normalizers/                 # Normalizers (plugins por fonte)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── normalizer_trait.rs      # Trait WebhookNormalizer
+    │   │   │   ├── tradingview.rs           # TradingView normalizer
+    │   │   │   ├── discord_bot.rs           # Discord bot normalizer
+    │   │   │   ├── custom_alert.rs          # Custom alerts normalizer
+    │   │   │   └── generic.rs               # Generic fallback normalizer
+    │   │   ├── queries/                     # Queries (CQRS read-side)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── get_webhook_history.rs   # Query: histórico de webhooks
+    │   │   │   └── get_source_stats.rs      # Query: estatísticas por fonte
+    │   │   └── services/                    # Application services (orquestração de casos de uso)
+    │   │       ├── mod.rs
+    │   │       ├── webhook_service.rs       # Caso de uso: processar webhook
+    │   │       ├── source_service.rs        # Caso de uso: gerenciar fontes
+    │   │       └── processing_orchestrator.rs # Orquestra: receive → auth → validate → normalize → publish
+    │   │
+    │   ├── infrastructure/                  # ⭐ Camada de Infraestrutura (implementações técnicas)
+    │   │   ├── mod.rs
+    │   │   ├── bootstrap/                   # Inicialização de componentes
+    │   │   │   ├── mod.rs
+    │   │   │   ├── database.rs              # Setup de conexão Postgres + migrations
+    │   │   │   ├── redis.rs                 # Setup de conexão Redis
+    │   │   │   ├── kafka_publisher.rs       # Inicializa publisher Kafka
+    │   │   │   └── http_server.rs           # Inicializa servidor HTTP (Axum)
+    │   │   ├── config/                      # Configuração e settings
+    │   │   │   ├── mod.rs
+    │   │   │   ├── settings.rs              # Struct Settings + carregamento de env vars
+    │   │   │   └── sources_config.rs        # Configurações por fonte (tokens, limits, etc.)
+    │   │   ├── messaging/                   # Messaging
+    │   │   │   ├── mod.rs
+    │   │   │   └── kafka_signal_publisher.rs # Publisher de sinais para Kafka
+    │   │   ├── authentication/              # Autenticação
+    │   │   │   ├── mod.rs
+    │   │   │   ├── token_authenticator.rs   # Bearer token authentication
+    │   │   │   ├── hmac_authenticator.rs    # HMAC signature validation
+    │   │   │   ├── ip_whitelist.rs          # IP whitelist validation
+    │   │   │   └── api_key_authenticator.rs # API key authentication
+    │   │   ├── rate_limiting/               # Rate limiting
+    │   │   │   ├── mod.rs
+    │   │   │   ├── token_bucket_limiter.rs  # Token bucket via Redis
+    │   │   │   └── sliding_window_limiter.rs # Sliding window via Redis
+    │   │   ├── replay_prevention/           # Replay attack prevention
+    │   │   │   ├── mod.rs
+    │   │   │   └── redis_replay_detector.rs # Detector via Redis (request signature cache)
+    │   │   ├── persistence/                 # Persistência (Postgres)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── postgres_webhook_repository.rs   # Store de webhooks (audit)
+    │   │   │   └── postgres_source_repository.rs    # Store de fontes
+    │   │   ├── schema_validation/           # Validação de schemas
+    │   │   │   ├── mod.rs
+    │   │   │   └── json_schema_validator.rs # Validador JSON Schema
+    │   │   ├── metrics/                     # Métricas e observabilidade
+    │   │   │   ├── mod.rs
+    │   │   │   └── prometheus_metrics.rs    # Registra métricas Prometheus
+    │   │   ├── shutdown/                    # Shutdown graceful
+    │   │   │   ├── mod.rs
+    │   │   │   ├── graceful.rs              # Coordena shutdown (drain requests, close connections)
+    │   │   │   └── signal_handler.rs        # Captura sinais SIGTERM/SIGINT
+    │   │   └── startup/                     # Startup do aplicativo
+    │   │       ├── mod.rs
+    │   │       ├── banner.rs                # Banner ASCII no console
+    │   │       ├── health.rs                # Health checks
+    │   │       └── logging.rs               # Setup de logs (tracing-subscriber)
+    │   │
+    │   ├── presentation/                    # ⭐ Camada de Apresentação (HTTP REST API)
+    │   │   ├── mod.rs
+    │   │   └── http/                        # HTTP REST API (Axum)
+    │   │       ├── mod.rs
+    │   │       ├── router.rs                # Definição de rotas (endpoints por fonte)
+    │   │       ├── responses.rs             # Helpers de resposta (WebhookResponse, ErrorResponse)
+    │   │       ├── extractors/              # Axum extractors customizados
+    │   │       │   ├── mod.rs
+    │   │       │   ├── signature_extractor.rs   # Extrai e valida HMAC signature
+    │   │       │   └── source_extractor.rs      # Extrai informações da fonte
+    │   │       ├── handlers/                # HTTP handlers (por fonte)
+    │   │       │   ├── mod.rs
+    │   │       │   ├── tradingview_handler.rs   # POST /webhook/tradingview
+    │   │       │   ├── discord_bot_handler.rs   # POST /webhook/discord
+    │   │       │   ├── custom_alert_handler.rs  # POST /webhook/custom
+    │   │       │   ├── generic_handler.rs       # POST /webhook/generic
+    │   │       │   ├── health_handler.rs        # GET /health
+    │   │       │   └── webhook_history_handler.rs # GET /webhooks/history
+    │   │       └── middleware/              # Middlewares HTTP
+    │   │           ├── mod.rs
+    │   │           ├── auth_middleware.rs   # Middleware de autenticação
+    │   │           ├── rate_limit_middleware.rs # Middleware de rate limiting
+    │   │           ├── replay_detection_middleware.rs # Middleware anti-replay
+    │   │           └── request_logger.rs    # Log de requests HTTP
+    │   │
+    │   └── shared/                          # ⭐ Shared Kernel (código transversal)
+    │       ├── mod.rs
+    │       ├── errors.rs                    # Erros compartilhados (ApplicationError, InfrastructureError)
+    │       ├── types.rs                     # Tipos compartilhados (EventEnvelope, Timestamp, etc.)
+    │       ├── traits/                      # Traits comuns
+    │       │   ├── mod.rs
+    │       │   └── aggregate_root.rs        # Trait AggregateRoot
+    │       └── utils/                       # Utilitários
+    │           ├── mod.rs
+    │           ├── datetime.rs              # Helpers de data/hora
+    │           ├── hmac.rs                  # Helpers de HMAC
+    │           ├── validation.rs            # Validações genéricas
+    │           └── json.rs                  # Helpers JSON
+    │
+    ├── config/                              # 📁 Configurações externas
+    │   ├── development.yaml                 # Config para ambiente dev
+    │   ├── production.yaml                  # Config para ambiente prod
+    │   ├── sources/                         # Configurações por fonte
+    │   │   ├── tradingview.yaml             # Config TradingView (auth, limits, schema)
+    │   │   ├── discord_bot.yaml             # Config Discord bot
+    │   │   ├── custom_alert.yaml            # Config custom alerts
+    │   │   └── generic.yaml                 # Config generic webhooks
+    │   └── schemas/                         # JSON Schemas por fonte
+    │       ├── tradingview_schema.json      # Schema esperado do TradingView
+    │       ├── discord_bot_schema.json      # Schema Discord bot
+    │       └── custom_alert_schema.json     # Schema custom alerts
+    │
+    ├── migrations/                          # 📊 Migrações de banco (Flyway)
+    │   ├── V001__initial_schema.sql         # Schema inicial (webhooks, sources)
+    │   ├── V002__webhook_metadata.sql       # Metadados adicionais
+    │   └── V003__indexes.sql                # Índices para performance
+    │
+    ├── docs/                                # 📚 Documentação técnica
+    │   ├── README.md                        # Índice de documentação
+    │   ├── ARCHITECTURE.md                  # Detalhes da arquitetura hexagonal
+    │   ├── SOURCES.md                       # Como adicionar nova fonte
+    │   ├── TRADINGVIEW_SETUP.md             # Setup de webhooks no TradingView
+    │   └── SECURITY.md                      # Considerações de segurança
+    │
+    ├── Cargo.toml                           # Configuração Rust (deps, features)
+    ├── Cargo.lock                           # Lock file de dependências
+    ├── Dockerfile                           # Build multi-stage production
+    ├── docker-compose.yml                   # Stack completa (app, Kafka, Postgres, Redis)
+    ├── Makefile                             # Comandos make (build, test, docker)
+    ├── crypto-webhook_projectmap.yaml       # Este arquivo (documentação estruturada)
+    └── README.md                            # Documentação principal do projeto
+    
+  conventions:
+    domain_layer:
+      description: Camada de Domínio (domain/)
+      rules:
+        - ✅ Sem dependências de infraestrutura
+        - ✅ Lógica de negócio pura (validação de sinais, normalização)
+        - ✅ Aggregates aplicam eventos e validam invariantes
+        - ✅ Value objects imutáveis com validação
+        - ✅ Services de domínio para lógica cross-aggregate
+        - ✅ Repositories como traits (contratos apenas)
+        
+    application_layer:
+      description: Camada de Aplicação (application/)
+      rules:
+        - ✅ Define Ports (interfaces) que infraestrutura implementa
+        - ✅ Orquestra casos de uso (receive → validate → normalize → publish)
+        - ✅ DTOs para comunicação entre camadas
+        - ✅ Normalizers como plugins (trait-based)
+        - ✅ Queries para read-side (histórico, stats)
+        - ✅ Não conhece detalhes de implementação (Axum, Kafka, Redis)
+        
+    infrastructure_layer:
+      description: Camada de Infraestrutura (infrastructure/)
+      rules:
+        - ✅ Implementa Adapters (HTTP, Kafka, Postgres, Redis)
+        - ✅ Bootstrap e configuração
+        - ✅ Authentication (token, HMAC, IP whitelist)
+        - ✅ Rate limiting (Redis-based)
+        - ✅ Replay prevention (Redis cache)
+        - ✅ Persistence (Postgres)
+        - ✅ Shutdown graceful
+        - ✅ Startup e health checks
+        
+    presentation_layer:
+      description: Camada de Apresentação (presentation/)
+      rules:
+        - ✅ HTTP REST API (Axum)
+        - ✅ Handlers por fonte (/webhook/tradingview, etc)
+        - ✅ Extractors customizados (signature, source)
+        - ✅ Middlewares (auth, rate limit, replay detection)
+        - ✅ Conversão DTOs <-> JSON
+        - ✅ Não contém lógica de negócio
+        
+    shared_kernel:
+      description: Shared Kernel (shared/)
+      rules:
+        - ✅ Código compartilhado entre camadas
+        - ✅ Traits comuns (AggregateRoot)
+        - ✅ Tipos transversais (EventEnvelope)
+        - ✅ Utilitários (datetime, HMAC, validação, JSON)
+        - ✅ Erros compartilhados
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 5. FONTES DE WEBHOOK                                         │
+# └─────────────────────────────────────────────────────────────┘
+
+webhook_sources:
+  tradingview:
+    description: Alertas do TradingView
+    endpoint: POST /webhook/tradingview
+    authentication:
+      method: token
+      header: Authorization
+      format: "Bearer <token>"
+    rate_limit:
+      requests: 100
+      window: 1 minute
+    schema:
+      ticker: string (ex: "BINANCE:BTCUSDT")
+      action: enum [buy, sell]
+      price: string (número como string)
+      strategy: string (nome do alert)
+      time: optional string (timestamp)
+      exchange: optional string
+    normalization:
+      ticker: "BINANCE:BTCUSDT" → symbol: "BTCUSDT"
+      action: "buy" → side: BUY
+      strategy: "MA Cross" → strategy: "EXTERNAL_MA_CROSS"
+    confidence: 0.80 (configurável)
+    example_payload: |
+      {
+        "ticker": "BINANCE:BTCUSDT",
+        "action": "buy",
+        "price": "45123.50",
+        "strategy": "MA Crossover Alert",
+        "time": "2025-10-16T22:00:00Z"
+      }
+      
+  discord_bot:
+    description: Sinais de Discord bots (comunidades, bots de trading)
+    endpoint: POST /webhook/discord
+    authentication:
+      method: api_key
+      header: X-API-Key
+    rate_limit:
+      requests: 50
+      window: 1 minute
+    schema:
+      symbol: string
+      side: enum [BUY, SELL]
+      price: number
+      signal_name: string
+      confidence: optional number (0.0-1.0)
+      bot_id: string
+    normalization:
+      signal_name → strategy: "EXTERNAL_<SIGNAL_NAME>"
+      confidence: use provided or default 0.75
+    confidence: 0.75 (default se não fornecido)
+    example_payload: |
+      {
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "price": 45000.00,
+        "signal_name": "SCALPING_RSI",
+        "confidence": 0.80,
+        "bot_id": "discord_bot_123"
+      }
+      
+  custom_alert:
+    description: Alertas customizados (sistemas próprios, outros bots)
+    endpoint: POST /webhook/custom
+    authentication:
+      method: hmac
+      header: X-Signature
+      algorithm: SHA256
+      secret: configurável por cliente
+    rate_limit:
+      requests: 200
+      window: 1 minute
+    schema: Flexível (validação básica)
+      symbol: required string
+      action: required enum [buy, sell]
+      price: required number
+      Additional fields: optional
+    normalization:
+      action → side (uppercase)
+      strategy: use "EXTERNAL_CUSTOM" ou campo fornecido
+    confidence: 0.70 (configurável)
+    example_payload: |
+      {
+        "symbol": "ETHUSDT",
+        "action": "sell",
+        "price": 2500.00,
+        "stop_loss": 2550.00,
+        "metadata": {
+          "system": "my_custom_bot",
+          "strategy": "MEAN_REVERSION"
+        }
+      }
+      
+  generic:
+    description: Webhook genérico (catch-all para testes)
+    endpoint: POST /webhook/generic
+    authentication:
+      method: token
+      header: Authorization
+    rate_limit:
+      requests: 10
+      window: 1 minute
+    schema: Minimal validation
+      symbol: required
+      side: required
+    normalization:
+      Best-effort mapping
+      Defaults para campos faltantes
+    confidence: 0.60
+    use_case: Testes, prototipagem, fontes não padronizadas
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 6. AUTENTICAÇÃO E SEGURANÇA                                  │
+# └─────────────────────────────────────────────────────────────┘
+
+authentication:
+  methods:
+    bearer_token:
+      description: Token fixo no header Authorization
+      header: "Authorization: Bearer <token>"
+      validation: Compara token com valor configurado por fonte
+      use_case: TradingView, fontes simples
+      security_level: Médio
+      
+    hmac_signature:
+      description: Assinatura HMAC SHA256 do payload
+      header: "X-Signature: <hmac_sha256>"
+      algorithm: HMAC-SHA256
+      process: |
+        1. Fonte calcula: HMAC-SHA256(payload_json, secret)
+        2. Envia signature no header
+        3. Servidor recalcula e compara
+      validation: |
+        calculated_signature = HMAC-SHA256(request_body, configured_secret)
+        if calculated_signature != provided_signature → REJECT
+      use_case: Custom alerts, integrações seguras
+      security_level: Alto
+      
+    api_key:
+      description: API key no header customizado
+      header: "X-API-Key: <api_key>"
+      validation: Compara com valor configurado
+      use_case: Discord bots, APIs simples
+      security_level: Médio
+      
+    ip_whitelist:
+      description: Whitelist de IPs permitidos
+      validation: Verifica IP de origem contra lista
+      combinable: true (pode combinar com outros métodos)
+      use_case: Restringir acesso a IPs conhecidos
+      security_level: Médio (não protege contra IP spoofing)
+
+security_measures:
+  rate_limiting:
+    description: Limita requisições por fonte/IP
+    implementation: Token bucket via Redis
+    granularity:
+      - Por fonte (global)
+      - Por IP (individual)
+    configurável: true
+    default_limits:
+      tradingview: 100 req/min
+      discord_bot: 50 req/min
+      custom_alert: 200 req/min
+      generic: 10 req/min
+      
+  replay_prevention:
+    description: Previne replay attacks
+    implementation: Request signature cache (Redis)
+    process: |
+      1. Calcula hash do request (method + path + body + timestamp)
+      2. Verifica se hash existe no cache
+      3. Se existe → REJECT (replay)
+      4. Se não existe → aceita e armazena no cache
+    window: 5 minutos
+    cache_key: "replay:<signature_hash>"
+    
+  request_timeout:
+    description: Timeout para processar request
+    default: 10 segundos
+    prevents: Slowloris attacks, request flooding
+    
+  payload_size_limit:
+    description: Limita tamanho do payload
+    default: 1 MB
+    configurable: true per source
+    prevents: Memory exhaustion attacks
+    
+  https_only:
+    description: Aceita apenas HTTPS em produção
+    enforcement: Redirect HTTP → HTTPS ou reject
+    
+  cors:
+    description: CORS configurável
+    default: Disabled (webhooks geralmente não precisam)
+    configurable: true
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 7. NORMALIZAÇÃO DE PAYLOADS                                  │
+# └─────────────────────────────────────────────────────────────┘
+
+normalization:
+  concept: |
+    Cada fonte de webhook tem formato próprio de payload. A normalização
+    converte esses formatos heterogêneos para um formato padrão (SignalDTO)
+    que é publicado no Kafka.
+    
+  strategy: Plugin-based via trait WebhookNormalizer
+  
+  normalizer_trait: |
+    pub trait WebhookNormalizer {
+        fn normalize(&self, payload: Value) -> Result<SignalDTO>;
+        fn source_name(&self) -> &str;
+        fn default_confidence(&self) -> f64;
+    }
+  
+  implementations:
+    tradingview_normalizer:
+      input_fields:
+        - ticker: "BINANCE:BTCUSDT"
+        - action: "buy"
+        - price: "45000.00"
+        - strategy: "MA Crossover"
+      mapping:
+        ticker: |
+          Split by ":" → take last part
+          "BINANCE:BTCUSDT" → "BTCUSDT"
+        action: |
+          Lowercase → uppercase
+          "buy" → "BUY"
+        price: |
+          String → parse as f64
+          "45000.00" → 45000.00
+        strategy: |
+          Sanitize + prefix
+          "MA Crossover" → "EXTERNAL_MA_CROSSOVER"
+      output: SignalDTO
+      
+    discord_bot_normalizer:
+      input_fields:
+        - symbol: "BTCUSDT"
+        - side: "BUY"
+        - price: 45000.00
+        - signal_name: "SCALPING_RSI"
+        - confidence: 0.80
+      mapping:
+        symbol: Direct mapping
+        side: Direct mapping (já uppercase)
+        signal_name: Prefix → "EXTERNAL_SCALPING_RSI"
+        confidence: Use provided or default
+      output: SignalDTO
+      
+    custom_alert_normalizer:
+      input_fields: Flexível
+      mapping:
+        symbol: Extract from payload.symbol
+        action/side: Normalize to uppercase
+        strategy: Use provided or "EXTERNAL_CUSTOM"
+        price: Extract price field
+        Additional: Map to metadata
+      output: SignalDTO
+      
+  signal_dto_structure: |
+    pub struct SignalDTO {
+        pub symbol: String,
+        pub strategy: String,
+        pub source: String,
+        pub confidence: f64,
+        pub target_price: f64,
+        pub stop_loss: Option<f64>,
+        pub take_profit: Option<f64>,
+        pub quantity: Option<f64>,
+        pub metadata: HashMap<String, Value>,
+        pub timestamp: DateTime<Utc>,
+    }
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 8. FLUXOS PRINCIPAIS                                         │
+# └─────────────────────────────────────────────────────────────┘
+
+flows:
+  webhook_processing:
+    description: Fluxo completo de processamento de webhook
+    steps:
+      - step: 1
+        component: HTTP Server (Axum)
+        action: Recebe POST /webhook/tradingview
+        
+      - step: 2
+        component: Auth Middleware
+        action: |
+          - Extrai token do header Authorization
+          - Compara com token configurado para TradingView
+          - Se inválido → 401 Unauthorized
+        result: Authenticated ou Rejected
+        
+      - step: 3
+        component: Rate Limit Middleware
+        action: |
+          - Verifica rate limit no Redis (token bucket)
+          - Key: "ratelimit:tradingview"
+          - Se excedido → 429 Too Many Requests
+        result: Allowed ou Rate Limited
+        
+      - step: 4
+        component: Replay Detection Middleware
+        action: |
+          - Calcula hash do request
+          - Verifica no Redis se hash existe
+          - Se existe → 409 Conflict (replay)
+          - Se não → armazena hash (TTL 5min)
+        result: New Request ou Replay
+        
+      - step: 5
+        component: Handler (TradingViewHandler)
+        action: |
+          - Deserializa payload JSON
+          - Valida schema básico
+        
+      - step: 6
+        component: Schema Validator
+        action: |
+          - Valida contra JSON Schema de TradingView
+          - Verifica campos obrigatórios
+          - Se inválido → 400 Bad Request
+        result: Valid ou Invalid Schema
+        
+      - step: 7
+        component: Webhook Service
+        action: |
+          - Cria WebhookAggregate
+          - Aplica validações de domínio
+          
+      - step: 8
+        component: TradingView Normalizer
+        action: |
+          - Normaliza payload para SignalDTO
+          - ticker: "BINANCE:BTCUSDT" → symbol: "BTCUSDT"
+          - action: "buy" → side: BUY
+          - strategy: "MA Cross" → "EXTERNAL_MA_CROSS"
+          
+      - step: 9
+        component: Signal Enricher
+        action: |
+          - Adiciona webhook_id (UUID)
+          - Adiciona source: "tradingview"
+          - Adiciona received_at timestamp
+          - Adiciona confidence: 0.80
+          - Adiciona metadata (original payload, etc)
+          
+      - step: 10
+        component: Signal Publisher
+        action: |
+          - Publica SignalDTO em signals.buy (Kafka)
+          - Serializa para JSON
+          
+      - step: 11
+        component: Webhook Repository
+        action: |
+          - Persiste webhook no Postgres (audit)
+          - Inclui: payload, headers, resultado, timestamp
+          
+      - step: 12
+        component: Metrics
+        action: |
+          - webhooks_received_total{source="tradingview"} +1
+          - webhooks_processed_duration_seconds
+          
+      - step: 13
+        component: HTTP Response
+        action: Return 200 OK com webhook_id
+        
+    example_trace: |
+      [HTTP] POST /webhook/tradingview
+      [Auth] Token validated: OK
+      [RateLimit] tradingview: 45/100 requests → OK
+      [Replay] Hash not found → NEW REQUEST
+      [Handler] Payload deserialized
+      [SchemaValidator] Schema valid
+      [Normalizer] Normalized: BTCUSDT BUY @ 45123.50
+      [Enricher] Added webhook_id=550e8400-..., source=tradingview
+      [Publisher] Published to signals.buy
+      [Repository] Webhook persisted (id=550e8400-...)
+      [Metrics] webhooks_received_total{source="tradingview",status="success"} +1
+      [Response] 200 OK {"webhook_id": "550e8400-...", "status": "accepted"}
+
+  webhook_rejection:
+    description: Fluxo de rejeição de webhook
+    reasons:
+      - Authentication failure
+      - Rate limit exceeded
+      - Replay detected
+      - Schema validation failure
+      - Normalization error
+    steps:
+      - step: 1-4
+        action: Fluxo normal até validação falhar
+        
+      - step: 5
+        component: Middleware/Validator
+        action: Detecta violação
+        examples:
+          - Invalid token → 401
+          - Rate limit → 429
+          - Replay → 409
+          - Invalid schema → 400
+          
+      - step: 6
+        component: Metrics
+        action: |
+          - webhooks_rejected_total{source="tradingview",reason="auth_failed"} +1
+          
+      - step: 7
+        component: Webhook Repository (optional)
+        action: Persiste tentativa falhada (audit)
+        
+      - step: 8
+        component: HTTP Response
+        action: Return error code com detalhes
+        
+    example_responses:
+      auth_failed: |
+        401 Unauthorized
+        {"error": "Invalid authentication token"}
+        
+      rate_limited: |
+        429 Too Many Requests
+        {"error": "Rate limit exceeded", "retry_after": 60}
+        
+      replay_detected: |
+        409 Conflict
+        {"error": "Duplicate request detected"}
+        
+      invalid_schema: |
+        400 Bad Request
+        {"error": "Invalid payload schema", "details": ["ticker is required"]}
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 9. CONFIGURAÇÃO                                              │
+# └─────────────────────────────────────────────────────────────┘
+
+configuration:
+  format: YAML + Environment Variables
+  precedence: ENV > config file > defaults
+  
+  files:
+    development: config/development.yaml
+    production: config/production.yaml
+    sources: config/sources/*.yaml
+    schemas: config/schemas/*.json
+    
+  structure:
+    server:
+      host:
+        env: SERVER_HOST
+        default: "0.0.0.0"
+      port:
+        env: SERVER_PORT
+        default: 8080
+      timeout_seconds:
+        env: SERVER_TIMEOUT
+        default: 10
+      max_payload_size_bytes:
+        env: SERVER_MAX_PAYLOAD_SIZE
+        default: 1048576  # 1 MB
+        
+    kafka:
+      brokers:
+        env: KAFKA_BROKERS
+        default: "localhost:9092"
+      topics:
+        signals_buy: "signals.buy"
+        signals_sell: "signals.sell"
+      producer_timeout_ms:
+        env: KAFKA_PRODUCER_TIMEOUT
+        default: 5000
+        
+    redis:
+      url:
+        env: REDIS_URL
+        default: "redis://localhost:6379"
+      pool_size:
+        env: REDIS_POOL_SIZE
+        default: 10
+        
+    database:
+      url:
+        env: DATABASE_URL
+        required: true
+      pool_size:
+        env: DATABASE_POOL_SIZE
+        default: 5
+        
+    sources:
+      tradingview:
+        enabled:
+          env: SOURCE_TRADINGVIEW_ENABLED
+          default: true
+        auth_method: token
+        token:
+          env: TRADINGVIEW_TOKEN
+          required_if_enabled: true
+        rate_limit_requests:
+          env: TRADINGVIEW_RATE_LIMIT_REQUESTS
+          default: 100
+        rate_limit_window_seconds:
+          env: TRADINGVIEW_RATE_LIMIT_WINDOW
+          default: 60
+        confidence:
+          env: TRADINGVIEW_CONFIDENCE
+          default: 0.80
+          
+      discord_bot:
+        enabled:
+          env: SOURCE_DISCORD_ENABLED
+          default: false
+        auth_method: api_key
+        api_key:
+          env: DISCORD_API_KEY
+          required_if_enabled: true
+        rate_limit_requests: 50
+        rate_limit_window_seconds: 60
+        confidence: 0.75
+        
+      custom_alert:
+        enabled:
+          env: SOURCE_CUSTOM_ENABLED
+          default: false
+        auth_method: hmac
+        secret:
+          env: CUSTOM_HMAC_SECRET
+          required_if_enabled: true
+        rate_limit_requests: 200
+        rate_limit_window_seconds: 60
+        confidence: 0.70
+        
+      generic:
+        enabled:
+          env: SOURCE_GENERIC_ENABLED
+          default: true
+        auth_method: token
+        token:
+          env: GENERIC_TOKEN
+          required_if_enabled: true
+        rate_limit_requests: 10
+        rate_limit_window_seconds: 60
+        confidence: 0.60
+        
+    security:
+      replay_prevention_enabled:
+        env: SECURITY_REPLAY_PREVENTION
+        default: true
+      replay_window_seconds:
+        env: SECURITY_REPLAY_WINDOW
+        default: 300  # 5 minutos
+      https_only:
+        env: SECURITY_HTTPS_ONLY
+        default: false  # true em produção
+        
+    metrics:
+      enabled:
+        env: METRICS_ENABLED
+        default: true
+      port:
+        env: METRICS_PORT
+        default: 9090
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 10. MÉTRICAS E OBSERVABILIDADE                               │
+# └─────────────────────────────────────────────────────────────┘
+
+metrics:
+  prometheus_endpoint: /metrics
+  port: 9090
+  
+  counters:
+    - name: webhooks_received_total
+      help: Total de webhooks recebidos
+      labels: [source, status]
+      
+    - name: webhooks_rejected_total
+      help: Total de webhooks rejeitados
+      labels: [source, reason]
+      
+    - name: signals_published_total
+      help: Total de sinais publicados no Kafka
+      labels: [source, side]
+      
+    - name: authentication_failures_total
+      help: Total de falhas de autenticação
+      labels: [source, method]
+      
+    - name: rate_limit_exceeded_total
+      help: Total de requests bloqueados por rate limit
+      labels: [source]
+      
+    - name: replay_attacks_detected_total
+      help: Total de replay attacks detectados
+      labels: [source]
+      
+    - name: schema_validation_failures_total
+      help: Total de falhas de validação de schema
+      labels: [source]
+      
+  histograms:
+    - name: webhook_processing_duration_seconds
+      help: Duração do processamento de webhook
+      labels: [source]
+      buckets: [0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0]
+      
+    - name: normalization_duration_seconds
+      help: Duração da normalização de payload
+      labels: [source]
+      buckets: [0.001, 0.005, 0.01, 0.05, 0.1]
+      
+  gauges:
+    - name: active_http_connections
+      help: Número de conexões HTTP ativas
+      labels: []
+      
+    - name: rate_limit_tokens_remaining
+      help: Tokens restantes no rate limiter
+      labels: [source]
+
+  logging:
+    format: JSON (structured logging)
+    level: INFO (configurável via env)
+    fields:
+      - timestamp
+      - level
+      - message
+      - source
+      - webhook_id
+      - duration_ms
+      - error (if any)
+      - ip_address (optional)
+
+  tracing:
+    enabled: true
+    library: tracing / tracing-subscriber
+    spans:
+      - name: process_webhook
+        fields: [webhook_id, source]
+      - name: authenticate
+        fields: [source, method]
+      - name: normalize_payload
+        fields: [source]
+      - name: publish_signal
+        fields: [webhook_id, topic]
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 11. INSTRUÇÕES DE DESENVOLVIMENTO                            │
+# └─────────────────────────────────────────────────────────────┘
+
+development_instructions:
+  setup:
+    prerequisites:
+      - Rust 1.75+ (rustup)
+      - Docker & Docker Compose
+      - Postgres client (psql)
+      - Redis client (redis-cli)
+      - Kafka client (kafkacat/kcat)
+      - curl ou Postman (para testar webhooks)
+      
+    steps:
+      - step: 1
+        action: Clone o repositório
+        command: git clone <repo-url> && cd crypto-webhook
+        
+      - step: 2
+        action: Copie o arquivo de configuração
+        command: cp .env.example .env
+        
+      - step: 3
+        action: Configure as variáveis de ambiente
+        details: |
+          Edite .env e configure:
+          - TRADINGVIEW_TOKEN (token para TradingView)
+          - CUSTOM_HMAC_SECRET (secret para HMAC)
+          - DATABASE_URL
+          - KAFKA_BROKERS
+          - REDIS_URL
+          
+      - step: 4
+        action: Inicie dependências
+        command: docker-compose up -d kafka postgres redis
+        
+      - step: 5
+        action: Execute migrations
+        command: cargo run --bin migrate
+        
+      - step: 6
+        action: Instale dependências Rust
+        command: cargo build
+        
+      - step: 7
+        action: Execute o serviço
+        command: cargo run
+        
+  testing_webhooks:
+    tradingview_webhook:
+      description: Testar endpoint do TradingView
+      command: |
+        curl -X POST http://localhost:8080/webhook/tradingview \
+          -H "Authorization: Bearer seu-token-aqui" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "ticker": "BINANCE:BTCUSDT",
+            "action": "buy",
+            "price": "45000.00",
+            "strategy": "MA Crossover Alert"
+          }'
+          
+    custom_webhook_with_hmac:
+      description: Testar endpoint custom com HMAC
+      steps:
+        - step: 1
+          action: Calcular HMAC do payload
+          command: |
+            payload='{"symbol":"BTCUSDT","action":"buy","price":45000}'
+            signature=$(echo -n "$payload" | openssl dgst -sha256 -hmac "seu-secret" | awk '{print $2}')
+            echo "Signature: $signature"
+            
+        - step: 2
+          action: Enviar request com signature
+          command: |
+            curl -X POST http://localhost:8080/webhook/custom \
+              -H "X-Signature: $signature" \
+              -H "Content-Type: application/json" \
+              -d "$payload"
+              
+    verify_signal_published:
+      description: Verificar se sinal foi publicado no Kafka
+      command: |
+        kcat -C -b localhost:9092 -t signals.buy -o end
+        
+  debugging:
+    logs:
+      command: RUST_LOG=debug cargo run
+      
+    check_webhooks_stored:
+      command: |
+        psql $DATABASE_URL -c "SELECT * FROM webhooks ORDER BY created_at DESC LIMIT 5;"
+        
+    check_rate_limits:
+      command: |
+        redis-cli KEYS "ratelimit:*"
+        redis-cli GET "ratelimit:tradingview"
+        
+    check_replay_cache:
+      command: |
+        redis-cli KEYS "replay:*"
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 12. TROUBLESHOOTING                                          │
+# └─────────────────────────────────────────────────────────────┘
+
+troubleshooting:
+  common_issues:
+    - issue: "Webhooks sendo rejeitados com 401"
+      causes:
+        - Token inválido ou não configurado
+        - Header Authorization mal formatado
+      solutions:
+        - Verificar TRADINGVIEW_TOKEN: echo $TRADINGVIEW_TOKEN
+        - Verificar header: "Authorization: Bearer <token>"
+        - Verificar logs: RUST_LOG=debug
+        
+    - issue: "Webhooks rejeitados com 429 (rate limit)"
+      causes:
+        - Muitas requisições em curto período
+        - Rate limit configurado muito restritivo
+      solutions:
+        - Verificar contador no Redis: redis-cli GET "ratelimit:tradingview"
+        - Ajustar limites em config/sources/tradingview.yaml
+        - Aguardar janela de rate limit (default: 1 minuto)
+        
+    - issue: "Replay detected (409)"
+      causes:
+        - Requisição duplicada dentro da janela (5min)
+        - Request idêntico sendo enviado novamente
+      solutions:
+        - Verificar se é realmente replay ou bug no sender
+        - Limpar cache de replay: redis-cli DEL "replay:<hash>"
+        - Ajustar replay window se necessário
+        
+    - issue: "Schema validation failure (400)"
+      causes:
+        - Payload não conforme schema esperado
+        - Campos obrigatórios faltando
+      solutions:
+        - Verificar schema: cat config/schemas/tradingview_schema.json
+        - Comparar payload enviado vs schema
+        - Verificar logs de validação
+        
+    - issue: "Sinais não aparecendo no Kafka"
+      causes:
+        - Kafka não conectado
+        - Erro na publicação
+        - Tópico não existe
+      solutions:
+        - Verificar health: curl localhost:8080/health
+        - Verificar métricas: curl localhost:9090/metrics | grep signals_published
+        - Verificar logs de publicação
+        
+  health_checks:
+    service_health:
+      endpoint: GET /health
+      expected_response: |
+        {
+          "status": "healthy",
+          "version": "1.0.0",
+          "components": {
+            "http_server": "running",
+            "kafka": "connected",
+            "redis": "connected",
+            "database": "connected"
+          },
+          "sources": {
+            "tradingview": "enabled",
+            "discord_bot": "disabled",
+            "custom_alert": "enabled",
+            "generic": "enabled"
+          }
+        }
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 13. ADICIONANDO NOVA FONTE                                   │
+# └─────────────────────────────────────────────────────────────┘
+
+adding_new_source:
+  description: Guia para adicionar suporte a nova fonte de webhook
+  
+  steps:
+    - step: 1
+      title: Criar configuração da fonte
+      action: Criar config/sources/nova_fonte.yaml
+      content: |
+        enabled: true
+        auth_method: token  # ou hmac, api_key, ip_whitelist
+        token: ${NOVA_FONTE_TOKEN}
+        rate_limit_requests: 50
+        rate_limit_window_seconds: 60
+        confidence: 0.75
+        
+    - step: 2
+      title: Criar JSON Schema (opcional)
+      action: Criar config/schemas/nova_fonte_schema.json
+      content: |
+        {
+          "type": "object",
+          "required": ["symbol", "side", "price"],
+          "properties": {
+            "symbol": {"type": "string"},
+            "side": {"type": "string", "enum": ["BUY", "SELL"]},
+            "price": {"type": "number"}
+          }
+        }
+        
+    - step: 3
+      title: Implementar Normalizer
+      action: Criar src/application/normalizers/nova_fonte.rs
+      code_structure: |
+        pub struct NovaFonteNormalizer;
+        
+        impl WebhookNormalizer for NovaFonteNormalizer {
+            fn normalize(&self, payload: Value) -> Result<SignalDTO> {
+                // Mapear campos específicos da fonte
+                // para SignalDTO padrão
+            }
+            
+            fn source_name(&self) -> &str {
+                "nova_fonte"
+            }
+            
+            fn default_confidence(&self) -> f64 {
+                0.75
+            }
+        }
+        
+    - step: 4
+      title: Criar Handler HTTP
+      action: Criar src/presentation/http/handlers/nova_fonte_handler.rs
+      code_structure: |
+        pub async fn handle_nova_fonte_webhook(
+            State(state): State<AppState>,
+            Json(payload): Json<Value>,
+        ) -> Result<Json<WebhookResponse>> {
+            // Validar, normalizar, publicar
+        }
+        
+    - step: 5
+      title: Adicionar rota
+      action: Editar src/presentation/http/router.rs
+      code: |
+        .route("/webhook/nova_fonte", 
+               post(nova_fonte_handler::handle_nova_fonte_webhook))
+        
+    - step: 6
+      title: Registrar normalizer
+      action: Editar src/main.rs (bootstrap)
+      code: |
+        let normalizers = HashMap::from([
+            ("tradingview", Box::new(TradingViewNormalizer)),
+            ("nova_fonte", Box::new(NovaFonteNormalizer)),
+        ]);
+        
+    - step: 7
+      title: Testar
+      action: Enviar webhook de teste
+      command: |
+        curl -X POST http://localhost:8080/webhook/nova_fonte \
+          -H "Authorization: Bearer token" \
+          -H "Content-Type: application/json" \
+          -d '{"symbol":"BTCUSDT","side":"BUY","price":45000}'
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 14. ROADMAP & MELHORIAS FUTURAS                              │
+# └─────────────────────────────────────────────────────────────┘
+
+roadmap:
+  v1_0:
+    status: Current
+    features:
+      - ✅ TradingView webhooks
+      - ✅ Custom webhooks com HMAC
+      - ✅ Rate limiting
+      - ✅ Replay prevention
+      - ✅ Schema validation
+      - ✅ Normalização de payloads
+      
+  v1_1:
+    planned_features:
+      - Discord bot webhooks
+      - Telegram bot webhooks
+      - Webhook retry (se falhar publicação)
+      - Webhook scheduling (delay de publicação)
+      - Filtering rules (filtrar sinais antes de publicar)
+      
+  v2_0:
+    planned_features:
+      - GraphQL API (além de REST)
+      - Webhook transformations (scripting)
+      - A/B testing de fontes
+      - Machine learning para detectar fontes suspeitas
+      - Webhook chaining (webhook → transform → webhook)
+      - Multi-tenancy (múltiplos usuários/projetos)
+      
+  future_considerations:
+    - WebSocket support (push de sinais)
+    - Bidirectional webhooks (resposta assíncrona)
+    - Webhook marketplace (compartilhar normalizers)
+    - Cloud functions integration
+    - Edge deployment (Cloudflare Workers)
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 15. REFERÊNCIAS E DOCUMENTAÇÃO                               │
+# └─────────────────────────────────────────────────────────────┘
+
+references:
+  webhook_guides:
+    tradingview:
+      - name: TradingView Alerts & Webhooks
+        url: https://www.tradingview.com/support/solutions/43000529348-i-want-to-know-more-about-webhooks/
+        
+    discord:
+      - name: Discord Webhooks
+        url: https://discord.com/developers/docs/resources/webhook
+        
+  rust_libraries:
+    - name: Axum
+      url: https://docs.rs/axum
+      description: Web framework
+      
+    - name: tower-http
+      url: https://docs.rs/tower-http
+      description: HTTP middlewares
+      
+    - name: jsonschema
+      url: https://docs.rs/jsonschema
+      description: JSON Schema validation
+      
+    - name: hmac + sha2
+      url: https://docs.rs/hmac
+      description: HMAC signature validation
+      
+  security:
+    - HMAC Authentication
+    - Replay Attack Prevention
+    - Rate Limiting Algorithms (Token Bucket, Sliding Window)
+    - OWASP API Security
+    
+  architecture_patterns:
+    - Event-Driven Architecture
+    - Hexagonal Architecture (Ports & Adapters)
+    - Plugin Architecture
+    - Domain-Driven Design (DDD)
+
+
+# ════════════════════════════════════════════════════════════════
+# FIM DO PROJECT MAP
+# ════════════════════════════════════════════════════════════════

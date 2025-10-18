@@ -1,0 +1,1413 @@
+# ════════════════════════════════════════════════════════════════
+# CRYPTO-NOTIFICATIONS - PROJECT MAP
+# ════════════════════════════════════════════════════════════════
+# Sistema de notificações multi-canal para plataforma de trading
+# Linguagem: Rust
+# Versão: 1.0.0
+# ════════════════════════════════════════════════════════════════
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 1. OVERVIEW DO PROJETO                                      │
+# └─────────────────────────────────────────────────────────────┘
+
+project:
+  name: crypto-notifications
+  description: |
+    Serviço responsável por receber eventos do sistema de trading e 
+    distribuir notificações formatadas através de múltiplos canais 
+    (Telegram, Discord, Email, Webhooks).
+    
+    Características principais:
+    - Multi-canal com suporte a fallback
+    - Formatação rica e contextual
+    - Priorização inteligente de mensagens
+    - Rate limiting e throttling
+    - Agrupamento de mensagens para evitar spam
+    - Retry automático com exponential backoff
+    - Suporte a templates customizáveis
+    - Métricas e observabilidade
+
+  language: Rust
+  async_runtime: tokio
+  message_broker: Kafka (rdkafka)
+  
+  responsibilities:
+    - Consumir eventos dos tópicos Kafka
+    - Formatar mensagens de acordo com categoria e canal
+    - Enviar notificações via múltiplos canais
+    - Gerenciar rate limits por canal e usuário
+    - Agrupar notificações relacionadas
+    - Realizar retry em caso de falha
+    - Registrar histórico de notificações
+    - Prover métricas de entrega
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 2. ARQUITETURA                                               │
+# └─────────────────────────────────────────────────────────────┘
+
+architecture:
+  pattern: Event-Driven + Hexagonal Architecture + Plugin System
+  
+  components:
+    consumer:
+      description: Consome eventos do Kafka
+      technology: rdkafka (librdkafka wrapper)
+      concurrency: Multi-threaded tokio tasks
+      
+    router:
+      description: Roteia mensagens para canais apropriados
+      logic: |
+        - Lê preferências do usuário
+        - Aplica regras de priorização
+        - Seleciona canais baseado em categoria e urgência
+        
+    formatters:
+      description: Formata mensagens por canal
+      types:
+        - TelegramFormatter (Markdown)
+        - DiscordFormatter (Embeds)
+        - EmailFormatter (HTML)
+        - WebhookFormatter (JSON)
+        
+    channels:
+      description: Plugins de envio (trait-based)
+      interface: NotificationChannel trait
+      implementations:
+        - TelegramChannel
+        - DiscordChannel
+        - EmailChannel
+        - WebhookChannel
+        
+    throttler:
+      description: Rate limiting e agrupamento
+      strategy: Token bucket + message batching
+      storage: Redis (para estado distribuído)
+      
+    retry_manager:
+      description: Gerencia retentativas
+      strategy: Exponential backoff com jitter
+      max_attempts: 3
+      
+    metrics:
+      description: Coleta métricas
+      technology: Prometheus (rust-prometheus)
+      
+  data_flow: |
+    Kafka Topic → Consumer → Router → Formatter → Channel → External API
+                                ↓
+                            Throttler
+                                ↓
+                          Retry Manager
+                                ↓
+                            Metrics
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 3. TÓPICOS KAFKA                                             │
+# └─────────────────────────────────────────────────────────────┘
+
+kafka_topics:
+  consumed:
+    - name: notifications.send
+      description: Tópico principal de notificações
+      producers:
+        - crypto-management
+        - crypto-trader
+        - crypto-signals
+        - crypto-webhook
+      consumer_group: crypto-notifications-group
+      partitions: 3
+      replication_factor: 2
+      
+      schema:
+        channel:
+          type: string
+          enum: [telegram, discord, email, webhook, all]
+          description: Canal de destino
+          
+        priority:
+          type: string
+          enum: [critical, high, normal, low]
+          description: Prioridade da notificação
+          
+        category:
+          type: string
+          enum: [order, position, signal, alert, report, system]
+          description: Categoria do evento
+          
+        title:
+          type: string
+          description: Título da notificação
+          
+        message:
+          type: string
+          description: Mensagem principal
+          
+        data:
+          type: object
+          description: Dados estruturados para formatação
+          
+        user_id:
+          type: string
+          optional: true
+          description: ID do usuário (para preferências)
+          
+        timestamp:
+          type: string
+          format: ISO8601
+          
+      example_payload: |
+        {
+          "channel": "telegram",
+          "priority": "high",
+          "category": "position",
+          "title": "Position Opened",
+          "message": "LONG position opened on BTCUSDT",
+          "data": {
+            "symbol": "BTCUSDT",
+            "side": "LONG",
+            "quantity": 0.01,
+            "entry_price": 45000.00,
+            "strategy": "RSI_DIVERGENCE"
+          },
+          "user_id": "user_123",
+          "timestamp": "2025-10-16T22:00:00Z"
+        }
+
+  produced:
+    - name: notifications.delivered
+      description: Confirmação de entrega
+      schema:
+        notification_id: string
+        channel: string
+        status: enum [delivered, failed, throttled]
+        delivered_at: string
+        error: optional string
+        
+    - name: notifications.failed
+      description: Falhas após todas as tentativas
+      schema:
+        notification_id: string
+        channel: string
+        attempts: integer
+        last_error: string
+        original_payload: object
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 4. MAPA DE PASTAS                                            │
+# └─────────────────────────────────────────────────────────────┘
+
+project_structure:
+  description: Estrutura completa do projeto com descrição de cada módulo
+  architecture_layers: |
+    Presentation → Application → Domain
+                       ↓
+                Infrastructure
+    
+    - Domain: não depende de ninguém (núcleo puro)
+    - Application: depende apenas de Domain
+    - Infrastructure: implementa contratos de Application
+    - Presentation: usa Application e injeta Infrastructure via DI
+    
+  structure: |
+    crypto-notifications/
+    ├── src/
+    │   ├── main.rs                          # Entry point: bootstrap do app (config, DB, consumer, channels, HTTP server)
+    │   ├── lib.rs                           # Biblioteca pública expondo módulos principais
+    │   │
+    │   ├── domain/                          # ⭐ Camada de Domínio (regras de negócio puras, sem I/O)
+    │   │   ├── mod.rs
+    │   │   ├── errors.rs                    # Erros de domínio (validação, regras de negócio)
+    │   │   ├── aggregates/                  # Agregados DDD (NotificationAggregate, UserPreferencesAggregate)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── notification.rs          # Agregado de notificação (valida, aplica regras)
+    │   │   │   └── user_preferences.rs      # Agregado de preferências (canais, filtros)
+    │   │   ├── entities/                    # Entidades de domínio
+    │   │   │   ├── mod.rs
+    │   │   │   ├── notification.rs          # Entidade Notification
+    │   │   │   └── delivery_attempt.rs      # Entidade DeliveryAttempt (retry history)
+    │   │   ├── events/                      # Domain events (NotificationReceived, NotificationSent, etc.)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── notification_events.rs   # NotificationReceived, NotificationSent, NotificationFailed
+    │   │   │   └── preferences_events.rs    # PreferencesUpdated, ChannelEnabled, etc.
+    │   │   ├── repositories/                # Traits de repositórios (contratos)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── notification_repository.rs    # Contrato para persistir notificações
+    │   │   │   └── preferences_repository.rs     # Contrato para preferências de usuário
+    │   │   ├── services/                    # Serviços de domínio (lógica que não pertence a um agregado)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── priority_resolver.rs     # Resolve prioridade baseado em regras de negócio
+    │   │   │   └── throttling_policy.rs     # Políticas de throttling por categoria/canal
+    │   │   └── value_objects/               # Value objects (Channel, Priority, Category, etc.)
+    │   │       ├── mod.rs
+    │   │       ├── channel.rs               # VO Channel (telegram, discord, email, webhook)
+    │   │       ├── priority.rs              # VO Priority (critical, high, normal, low)
+    │   │       ├── category.rs              # VO Category (order, position, signal, alert, etc.)
+    │   │       └── notification_id.rs       # VO NotificationId (UUID wrapper)
+    │   │
+    │   ├── application/                     # ⭐ Camada de Aplicação (casos de uso, orquestração)
+    │   │   ├── mod.rs
+    │   │   ├── dtos/                        # Data Transfer Objects
+    │   │   │   ├── mod.rs
+    │   │   │   ├── commands.rs              # Command DTOs (SendNotificationCommand, UpdatePreferencesCommand)
+    │   │   │   ├── notification_dto.rs      # DTO para transferir dados de notificação
+    │   │   │   ├── requests.rs              # HTTP request DTOs
+    │   │   │   └── responses.rs             # HTTP response DTOs (ApiResponse, ErrorResponse)
+    │   │   ├── ports/                       # ⚡ Ports (interfaces/contratos para adapters)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── event_consumer_port.rs   # Contrato para consumir eventos Kafka
+    │   │   │   ├── notification_channel_port.rs  # Contrato para canais de notificação
+    │   │   │   ├── formatter_port.rs        # Contrato para formatadores
+    │   │   │   ├── throttler_port.rs        # Contrato para rate limiting/throttling
+    │   │   │   ├── retry_manager_port.rs    # Contrato para gerenciamento de retry
+    │   │   │   ├── notification_store_port.rs    # Contrato para persistir histórico
+    │   │   │   └── event_publisher_port.rs  # Contrato para publicar eventos (delivered, failed)
+    │   │   ├── queries/                     # Queries (CQRS read-side)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── get_notification_history.rs   # Query: histórico de notificações
+    │   │   │   └── get_user_preferences.rs       # Query: preferências do usuário
+    │   │   └── services/                    # Application services (orquestração de casos de uso)
+    │   │       ├── mod.rs
+    │   │       ├── notification_service.rs  # Caso de uso: processar e enviar notificação
+    │   │       ├── preferences_service.rs   # Caso de uso: gerenciar preferências
+    │   │       └── delivery_orchestrator.rs # Orquestra: routing → formatting → throttling → sending → retry
+    │   │
+    │   ├── infrastructure/                  # ⭐ Camada de Infraestrutura (implementações técnicas)
+    │   │   ├── mod.rs
+    │   │   ├── bootstrap/                   # Inicialização de componentes
+    │   │   │   ├── mod.rs
+    │   │   │   ├── database.rs              # Setup de conexão Postgres + migrations (se usar)
+    │   │   │   ├── redis.rs                 # Setup conexão Redis (throttling)
+    │   │   │   ├── kafka_consumer.rs        # Inicializa consumer Kafka
+    │   │   │   ├── channels.rs              # Inicializa canais (Telegram, Discord, etc.)
+    │   │   │   └── formatters.rs            # Inicializa formatadores
+    │   │   ├── config/                      # Configuração e settings
+    │   │   │   ├── mod.rs
+    │   │   │   └── settings.rs              # Struct Settings + carregamento de env vars
+    │   │   ├── messaging/                   # Messaging & Event Streaming
+    │   │   │   ├── mod.rs
+    │   │   │   ├── kafka_consumer.rs        # Consumer Kafka (rdkafka)
+    │   │   │   ├── kafka_event_publisher.rs # Publisher de eventos (delivered, failed)
+    │   │   │   └── message_handler.rs       # Handler que processa mensagens do Kafka
+    │   │   ├── channels/                    # Implementações de canais (Adapters)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── telegram_channel.rs      # Implementa NotificationChannelPort via teloxide
+    │   │   │   ├── discord_channel.rs       # Implementa NotificationChannelPort via serenity/webhook
+    │   │   │   ├── email_channel.rs         # Implementa NotificationChannelPort via lettre (SMTP)
+    │   │   │   └── webhook_channel.rs       # Implementa NotificationChannelPort via reqwest (HTTP)
+    │   │   ├── formatters/                  # Implementações de formatadores (Adapters)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── telegram_formatter.rs    # Formata Markdown para Telegram
+    │   │   │   ├── discord_formatter.rs     # Formata Embeds para Discord
+    │   │   │   ├── email_formatter.rs       # Formata HTML para Email
+    │   │   │   ├── webhook_formatter.rs     # Formata JSON para Webhooks
+    │   │   │   └── template_engine.rs       # Engine de templates (Handlebars)
+    │   │   ├── throttling/                  # Rate limiting e batching
+    │   │   │   ├── mod.rs
+    │   │   │   ├── token_bucket_limiter.rs  # Implementa ThrottlerPort via Token Bucket + Redis
+    │   │   │   ├── message_batcher.rs       # Agrupa mensagens em batches (time-window)
+    │   │   │   └── redis_state_store.rs     # Armazena estado de throttling no Redis
+    │   │   ├── retry/                       # Retry e error handling
+    │   │   │   ├── mod.rs
+    │   │   │   ├── exponential_backoff.rs   # Implementa RetryManagerPort com exp. backoff
+    │   │   │   └── retry_state_store.rs     # Armazena estado de retry (tentativas, delays)
+    │   │   ├── persistence/                 # Persistência (Postgres, se necessário)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── postgres_notification_store.rs    # Store de histórico de notificações
+    │   │   │   └── postgres_preferences_store.rs     # Store de preferências de usuário
+    │   │   ├── metrics/                     # Métricas e observabilidade
+    │   │   │   ├── mod.rs
+    │   │   │   └── prometheus_metrics.rs    # Registra métricas Prometheus
+    │   │   ├── shutdown/                    # Shutdown graceful
+    │   │   │   ├── mod.rs
+    │   │   │   ├── graceful.rs              # Coordena shutdown (flush, fecha conexões)
+    │   │   │   └── signal_handler.rs        # Captura sinais SIGTERM/SIGINT
+    │   │   └── startup/                     # Startup do aplicativo
+    │   │       ├── mod.rs
+    │   │       ├── banner.rs                # Banner ASCII no console
+    │   │       ├── health.rs                # Health checks
+    │   │       └── logging.rs               # Setup de logs (tracing-subscriber)
+    │   │
+    │   ├── presentation/                    # ⭐ Camada de Apresentação (HTTP, CLI futuro)
+    │   │   ├── mod.rs
+    │   │   └── http/                        # HTTP REST API (Axum)
+    │   │       ├── mod.rs
+    │   │       ├── router.rs                # Definição de rotas (endpoints)
+    │   │       ├── responses.rs             # Helpers de resposta (ApiResponse, ErrorResponse)
+    │   │       ├── controllers/             # Controllers HTTP
+    │   │       │   ├── mod.rs
+    │   │       │   ├── notification_controller.rs    # Endpoints de notificação
+    │   │       │   ├── preferences_controller.rs     # Endpoints de preferências
+    │   │       │   └── health_controller.rs          # Health checks, metrics
+    │   │       └── middleware/              # Middlewares HTTP (logging, auth futuro)
+    │   │           ├── mod.rs
+    │   │           └── request_logger.rs    # Log de requests HTTP
+    │   │
+    │   └── shared/                          # ⭐ Shared Kernel (código transversal)
+    │       ├── mod.rs
+    │       ├── errors.rs                    # Erros compartilhados (ApplicationError, InfrastructureError)
+    │       ├── types.rs                     # Tipos compartilhados (EventEnvelope, Timestamp, etc.)
+    │       ├── traits/                      # Traits comuns
+    │       │   ├── mod.rs
+    │       │   └── aggregate_root.rs        # Trait AggregateRoot (apply_event, uncommitted_events)
+    │       └── utils/                       # Utilitários
+    │           ├── mod.rs
+    │           ├── datetime.rs              # Helpers de data/hora
+    │           ├── validation.rs            # Validações genéricas
+    │           └── emoji_helper.rs          # Helper de emojis para formatação
+    │
+    ├── config/                              # 📁 Configurações externas
+    │   ├── development.yaml                 # Config para ambiente dev
+    │   ├── production.yaml                  # Config para ambiente prod
+    │   └── templates/                       # Templates de mensagens
+    │       ├── telegram/
+    │       │   ├── order_filled.hbs         # Template Telegram: ordem executada
+    │       │   ├── position_opened.hbs      # Template Telegram: posição aberta
+    │       │   ├── position_closed.hbs      # Template Telegram: posição fechada
+    │       │   └── signal_generated.hbs     # Template Telegram: sinal gerado
+    │       ├── discord/
+    │       │   ├── order_filled.json        # Template Discord embed: ordem
+    │       │   └── position_opened.json     # Template Discord embed: posição
+    │       └── email/
+    │           ├── order_filled.html        # Template Email HTML: ordem
+    │           └── position_opened.html     # Template Email HTML: posição
+    │
+    ├── migrations/                          # 📊 Migrações de banco (se usar Postgres)
+    │   ├── V001__initial_schema.sql         # Schema inicial (notifications, users)
+    │   ├── V002__user_preferences.sql       # Tabela de preferências
+    │   └── V003__delivery_history.sql       # Histórico de entregas
+    │
+    ├── docs/                                # 📚 Documentação técnica
+    │   ├── README.md                        # Índice de documentação
+    │   ├── ARCHITECTURE.md                  # Detalhes da arquitetura hexagonal
+    │   └── CHANNELS.md                      # Documentação de cada canal
+    │
+    ├── Cargo.toml                           # Configuração Rust (deps, features)
+    ├── Cargo.lock                           # Lock file de dependências
+    ├── Dockerfile                           # Build multi-stage production
+    ├── docker-compose.yml                   # Stack completa (app, Kafka, Redis, Postgres)
+    ├── Makefile                             # Comandos make (build, test, docker)
+    ├── crypto-notifications_projectmap.yaml # Este arquivo (documentação estruturada)
+    └── README.md                            # Documentação principal do projeto
+    
+  conventions:
+    domain_layer:
+      description: Camada de Domínio (domain/)
+      rules:
+        - ✅ Sem dependências de infraestrutura
+        - ✅ Lógica de negócio pura
+        - ✅ Aggregates aplicam eventos e validam invariantes
+        - ✅ Value objects imutáveis
+        - ✅ Repositories como traits (contratos apenas)
+        
+    application_layer:
+      description: Camada de Aplicação (application/)
+      rules:
+        - ✅ Define Ports (interfaces) que infraestrutura implementa
+        - ✅ Orquestra casos de uso
+        - ✅ DTOs para comunicação entre camadas
+        - ✅ Queries para read-side (CQRS)
+        - ✅ Services orquestram múltiplos agregados/ports
+        
+    infrastructure_layer:
+      description: Camada de Infraestrutura (infrastructure/)
+      rules:
+        - ✅ Implementa Adapters (Telegram, Discord, Kafka, Redis, Postgres)
+        - ✅ Bootstrap e configuração
+        - ✅ Messaging e streaming
+        - ✅ Persistence (Postgres)
+        - ✅ Shutdown graceful
+        - ✅ Startup e health checks
+        
+    presentation_layer:
+      description: Camada de Apresentação (presentation/)
+      rules:
+        - ✅ HTTP REST API (Axum)
+        - ✅ Controllers e routers
+        - ✅ Conversão DTOs <-> JSON
+        - ✅ Middlewares (logging, auth futuro)
+        - ✅ Não contém lógica de negócio
+        
+    shared_kernel:
+      description: Shared Kernel (shared/)
+      rules:
+        - ✅ Código compartilhado entre camadas
+        - ✅ Traits comuns (AggregateRoot)
+        - ✅ Tipos transversais (EventEnvelope)
+        - ✅ Utilitários (datetime, validação)
+        - ✅ Erros compartilhados
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 5. CANAIS DE NOTIFICAÇÃO                                     │
+# └─────────────────────────────────────────────────────────────┘
+
+notification_channels:
+  telegram:
+    priority: 1
+    technology: teloxide / telegram-bot-api
+    features:
+      - Markdown/HTML formatting
+      - Inline buttons
+      - Message editing
+      - File attachments
+    rate_limits:
+      - 30 messages/second per bot
+      - 20 messages/minute per chat
+    config_required:
+      - TELEGRAM_BOT_TOKEN
+      - TELEGRAM_CHAT_ID (default, pode ser por usuário)
+    retry_strategy: exponential_backoff
+    
+  discord:
+    priority: 2
+    technology: serenity / discord webhooks
+    features:
+      - Rich embeds
+      - Color coding
+      - Thumbnail/images
+      - Fields
+    rate_limits:
+      - 5 requests/second per webhook
+      - 30 requests/minute per webhook
+    config_required:
+      - DISCORD_WEBHOOK_URL
+    retry_strategy: exponential_backoff
+    
+  email:
+    priority: 3
+    technology: lettre (SMTP)
+    features:
+      - HTML templates
+      - Attachments
+      - CC/BCC
+    rate_limits:
+      - Provider dependent (configurável)
+    config_required:
+      - SMTP_HOST
+      - SMTP_PORT
+      - SMTP_USERNAME
+      - SMTP_PASSWORD
+      - SMTP_FROM_EMAIL
+    retry_strategy: exponential_backoff
+    
+  webhook:
+    priority: 4
+    technology: reqwest (HTTP client)
+    features:
+      - Custom JSON payloads
+      - Custom headers
+      - Signature verification (HMAC)
+    rate_limits:
+      - Configurável por endpoint
+    config_required:
+      - WEBHOOK_URL
+      - WEBHOOK_SECRET (optional, para HMAC)
+    retry_strategy: exponential_backoff
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 6. FORMATAÇÃO DE MENSAGENS                                   │
+# └─────────────────────────────────────────────────────────────┘
+
+message_formatting:
+  templates_engine: handlebars-rust
+  
+  categories:
+    order:
+      emoji: "💰"
+      telegram_format: |
+        {{emoji}} *{{event_type}}*
+        ━━━━━━━━━━━━━━━
+        Asset: `{{symbol}}`
+        Side: {{side}} {{side_emoji}}
+        Type: {{order_type}}
+        Quantity: {{quantity}}
+        Price: ${{price}}
+        {{#if filled_quantity}}
+        Filled: {{filled_quantity}}/{{quantity}}
+        {{/if}}
+        ━━━━━━━━━━━━━━━
+        ⏰ {{timestamp}}
+        
+      discord_format:
+        embed:
+          title: "{{event_type}}"
+          color: "{{color}}"  # green for buy, red for sell
+          fields:
+            - name: Asset
+              value: "{{symbol}}"
+              inline: true
+            - name: Side
+              value: "{{side}}"
+              inline: true
+            - name: Price
+              value: "${{price}}"
+              inline: true
+          footer:
+            text: "{{timestamp}}"
+            
+    position:
+      emoji_opened: "🟢"
+      emoji_closed: "🔴"
+      telegram_format_opened: |
+        🟢 *POSITION OPENED*
+        ━━━━━━━━━━━━━━━
+        Asset: `{{symbol}}`
+        Side: {{side}} {{side_emoji}}
+        Quantity: {{quantity}}
+        Entry: ${{entry_price}}
+        {{#if strategy}}
+        Strategy: {{strategy}}
+        {{/if}}
+        ━━━━━━━━━━━━━━━
+        ⏰ {{timestamp}}
+        
+      telegram_format_closed: |
+        🔴 *POSITION CLOSED*
+        ━━━━━━━━━━━━━━━
+        Asset: `{{symbol}}`
+        P&L: {{pnl_emoji}} ${{pnl}} ({{pnl_percent}}%)
+        Duration: {{duration}}
+        Exit: ${{exit_price}}
+        {{#if reason}}
+        Reason: {{reason}}
+        {{/if}}
+        ━━━━━━━━━━━━━━━
+        ⏰ {{timestamp}}
+        
+    signal:
+      emoji: "📊"
+      telegram_format: |
+        📊 *TRADING SIGNAL*
+        ━━━━━━━━━━━━━━━
+        Asset: `{{symbol}}`
+        Action: {{action}} {{action_emoji}}
+        Strategy: {{strategy}}
+        Confidence: {{confidence}}%
+        {{#if source}}
+        Source: {{source}}
+        {{/if}}
+        ━━━━━━━━━━━━━━━
+        Price: ${{price}}
+        {{#if stop_loss}}
+        Stop Loss: ${{stop_loss}}
+        {{/if}}
+        {{#if take_profit}}
+        Take Profit: ${{take_profit}}
+        {{/if}}
+        ━━━━━━━━━━━━━━━
+        ⏰ {{timestamp}}
+        
+    alert:
+      emoji: "⚠️"
+      telegram_format: |
+        ⚠️ *ALERT*
+        ━━━━━━━━━━━━━━━
+        {{message}}
+        ━━━━━━━━━━━━━━━
+        ⏰ {{timestamp}}
+        
+    report:
+      emoji: "📈"
+      telegram_format: |
+        📈 *{{report_type}}*
+        ━━━━━━━━━━━━━━━
+        {{message}}
+        
+        {{#if metrics}}
+        *Metrics:*
+        {{#each metrics}}
+        • {{@key}}: {{this}}
+        {{/each}}
+        {{/if}}
+        ━━━━━━━━━━━━━━━
+        ⏰ {{timestamp}}
+
+  helpers:
+    side_emoji:
+      LONG: "📈"
+      SHORT: "📉"
+      BUY: "🟢"
+      SELL: "🔴"
+      
+    pnl_emoji:
+      condition: "pnl > 0"
+      positive: "🎉"
+      negative: "😞"
+      
+    action_emoji:
+      BUY: "🟢"
+      SELL: "🔴"
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 7. PRIORIZAÇÃO E THROTTLING                                  │
+# └─────────────────────────────────────────────────────────────┘
+
+prioritization:
+  levels:
+    critical:
+      description: Envio imediato, sem throttling
+      channels: [telegram, discord, email]
+      examples:
+        - Sistema em falha crítica
+        - Ordem rejeitada por risco
+        - Drawdown máximo atingido
+      rate_limit: none
+      
+    high:
+      description: Envio prioritário com throttling mínimo
+      channels: [telegram, discord]
+      examples:
+        - Posição aberta/fechada
+        - Ordem executada
+        - Stop loss acionado
+      rate_limit: 1 msg/segundo
+      batching: disabled
+      
+    normal:
+      description: Envio normal com throttling
+      channels: [telegram]
+      examples:
+        - Sinais gerados
+        - Atualizações de posição
+      rate_limit: 1 msg/5 segundos
+      batching:
+        enabled: true
+        window: 30 segundos
+        max_batch_size: 5
+        
+    low:
+      description: Envio com maior throttling e batching
+      channels: [email]
+      examples:
+        - Relatórios periódicos
+        - Logs informativos
+      rate_limit: 1 msg/minuto
+      batching:
+        enabled: true
+        window: 5 minutos
+        max_batch_size: 10
+
+throttling:
+  strategy: Token Bucket
+  implementation:
+    storage: Redis
+    key_pattern: "throttle:{channel}:{user_id}"
+    
+  per_channel:
+    telegram:
+      tokens: 30
+      refill_rate: 1 per second
+      
+    discord:
+      tokens: 5
+      refill_rate: 1 per second
+      
+    email:
+      tokens: 10
+      refill_rate: 1 per minute
+
+  batching:
+    enabled_for: [normal, low]
+    strategy: Time-based windowing
+    aggregation:
+      group_by: [category, symbol]
+      format: |
+        📦 *{{count}} Notifications*
+        ━━━━━━━━━━━━━━━
+        {{#each grouped}}
+        {{this.emoji}} {{this.title}}
+        {{/each}}
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 8. RETRY E ERROR HANDLING                                    │
+# └─────────────────────────────────────────────────────────────┘
+
+retry_policy:
+  strategy: Exponential Backoff with Jitter
+  max_attempts: 3
+  initial_delay: 1s
+  max_delay: 30s
+  multiplier: 2
+  jitter: 0.1
+  
+  retryable_errors:
+    - Network timeout
+    - 5xx server errors
+    - Rate limit exceeded (429)
+    - Connection refused
+    
+  non_retryable_errors:
+    - Invalid token/credentials (401)
+    - Malformed payload (400)
+    - Not found (404)
+    
+  backoff_formula: |
+    delay = min(initial_delay * (multiplier ^ attempt), max_delay)
+    jittered_delay = delay * (1 + random(-jitter, jitter))
+    
+  example:
+    attempt_1: ~1s
+    attempt_2: ~2s
+    attempt_3: ~4s
+
+error_handling:
+  logging:
+    level: error
+    include:
+      - Original payload
+      - Channel attempted
+      - Error message
+      - Stacktrace (if panic)
+      
+  notification_on_failure:
+    enabled: true
+    channel: telegram
+    recipient: admin_chat_id
+    format: |
+      🚨 *NOTIFICATION FAILURE*
+      ━━━━━━━━━━━━━━━
+      Channel: {{channel}}
+      Category: {{category}}
+      Attempts: {{attempts}}
+      Error: {{error}}
+      ━━━━━━━━━━━━━━━
+      Original: {{original_message}}
+
+  dead_letter_queue:
+    enabled: true
+    topic: notifications.failed
+    retention: 7 days
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 9. CONFIGURAÇÃO                                              │
+# └─────────────────────────────────────────────────────────────┘
+
+configuration:
+  format: YAML + Environment Variables
+  precedence: ENV > config file > defaults
+  
+  files:
+    development: config/development.yaml
+    production: config/production.yaml
+    
+  structure:
+    kafka:
+      brokers: 
+        env: KAFKA_BROKERS
+        default: "localhost:9092"
+      consumer_group:
+        env: KAFKA_CONSUMER_GROUP
+        default: "crypto-notifications-group"
+      topics:
+        notifications: "notifications.send"
+        
+    redis:
+      url:
+        env: REDIS_URL
+        default: "redis://localhost:6379"
+      pool_size: 10
+      
+    telegram:
+      enabled:
+        env: TELEGRAM_ENABLED
+        default: true
+      bot_token:
+        env: TELEGRAM_BOT_TOKEN
+        required: true
+      default_chat_id:
+        env: TELEGRAM_CHAT_ID
+        required: true
+        
+    discord:
+      enabled:
+        env: DISCORD_ENABLED
+        default: false
+      webhook_url:
+        env: DISCORD_WEBHOOK_URL
+        required_if_enabled: true
+        
+    email:
+      enabled:
+        env: EMAIL_ENABLED
+        default: false
+      smtp_host:
+        env: SMTP_HOST
+      smtp_port:
+        env: SMTP_PORT
+        default: 587
+      username:
+        env: SMTP_USERNAME
+      password:
+        env: SMTP_PASSWORD
+      from:
+        env: SMTP_FROM_EMAIL
+        
+    webhook:
+      enabled:
+        env: WEBHOOK_ENABLED
+        default: false
+      url:
+        env: WEBHOOK_URL
+      secret:
+        env: WEBHOOK_SECRET
+        optional: true
+        
+    throttling:
+      enabled:
+        env: THROTTLING_ENABLED
+        default: true
+      batching_enabled:
+        env: BATCHING_ENABLED
+        default: true
+        
+    retry:
+      max_attempts:
+        env: RETRY_MAX_ATTEMPTS
+        default: 3
+      initial_delay_ms:
+        env: RETRY_INITIAL_DELAY_MS
+        default: 1000
+        
+    metrics:
+      enabled:
+        env: METRICS_ENABLED
+        default: true
+      port:
+        env: METRICS_PORT
+        default: 9090
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 10. FLUXOS PRINCIPAIS                                        │
+# └─────────────────────────────────────────────────────────────┘
+
+flows:
+  basic_notification:
+    description: Fluxo básico de notificação simples
+    steps:
+      - step: 1
+        component: Kafka Consumer
+        action: Consome mensagem do tópico notifications.send
+        
+      - step: 2
+        component: Message Handler
+        action: Deserializa payload e valida schema
+        
+      - step: 3
+        component: Router
+        action: |
+          - Lê preferências do usuário (se user_id presente)
+          - Determina canais baseado em 'channel' field
+          - Aplica regras de priorização
+          
+      - step: 4
+        component: Throttler
+        action: |
+          - Verifica rate limit (Redis)
+          - Se throttled: adiciona à fila de batch
+          - Se ok: prossegue
+          
+      - step: 5
+        component: Formatter
+        action: |
+          - Seleciona template baseado em categoria
+          - Renderiza template com dados
+          - Aplica formatação específica do canal
+          
+      - step: 6
+        component: Channel
+        action: |
+          - Envia para API externa
+          - Trata resposta
+          
+      - step: 7
+        component: Retry Manager (se falha)
+        action: |
+          - Calcula delay de retry
+          - Agenda nova tentativa
+          - Se max_attempts: publica em notifications.failed
+          
+      - step: 8
+        component: Metrics
+        action: |
+          - Incrementa contador de entregas
+          - Registra latência
+          - Atualiza taxa de sucesso
+          
+    example_trace: |
+      [Consumer] Received from Kafka: notifications.send
+      [Handler] Validated payload: category=position, priority=high
+      [Router] Selected channels: [telegram, discord]
+      [Throttler] telegram: OK (tokens: 29/30)
+      [Throttler] discord: OK (tokens: 4/5)
+      [Formatter:Telegram] Rendered template: position_opened
+      [Formatter:Discord] Rendered embed: position_opened
+      [Channel:Telegram] Sent to chat_id=123456, msg_id=789
+      [Channel:Discord] Sent to webhook, status=204
+      [Metrics] notifications_sent{channel="telegram",category="position"} +1
+      [Metrics] notifications_sent{channel="discord",category="position"} +1
+
+  batching_flow:
+    description: Fluxo com agrupamento de mensagens
+    steps:
+      - step: 1
+        component: Kafka Consumer
+        action: Consome várias mensagens priority=normal
+        
+      - step: 2
+        component: Throttler
+        action: |
+          - Detecta throttling ativo
+          - Adiciona mensagens ao batch buffer
+          
+      - step: 3
+        component: Batch Window
+        action: |
+          - Aguarda janela de tempo (30s)
+          - Ou atinge max_batch_size (5 msgs)
+          
+      - step: 4
+        component: Batch Aggregator
+        action: |
+          - Agrupa por categoria e símbolo
+          - Gera mensagem consolidada
+          
+      - step: 5
+        component: Formatter
+        action: Renderiza template de batch
+        
+      - step: 6
+        component: Channel
+        action: Envia mensagem única com múltiplos eventos
+        
+    example_output: |
+      📦 *5 Notifications*
+      ━━━━━━━━━━━━━━━
+      📊 Signal: BTC/USDT BUY
+      📊 Signal: ETH/USDT SELL
+      📊 Signal: BTC/USDT SELL
+      💰 Order: BTC/USDT FILLED
+      💰 Order: ETH/USDT CREATED
+
+  retry_flow:
+    description: Fluxo com falha e retry
+    steps:
+      - step: 1
+        component: Channel
+        action: Tentativa 1 - Timeout após 5s
+        result: Error (Network Timeout)
+        
+      - step: 2
+        component: Retry Manager
+        action: |
+          - Identifica erro como retryable
+          - Calcula delay: ~1s (attempt 1)
+          - Agenda retry
+          
+      - step: 3
+        component: Channel
+        action: Tentativa 2 - Rate limit 429
+        result: Error (Too Many Requests)
+        
+      - step: 4
+        component: Retry Manager
+        action: |
+          - Calcula delay: ~2s (attempt 2)
+          - Agenda retry
+          
+      - step: 5
+        component: Channel
+        action: Tentativa 3 - Sucesso
+        result: OK
+        
+      - step: 6
+        component: Metrics
+        action: |
+          - notifications_retries{channel="telegram"} +2
+          - notifications_sent{channel="telegram"} +1
+
+  failure_flow:
+    description: Fluxo com falha definitiva
+    steps:
+      - step: 1-6
+        action: Retry flow (3 tentativas falharam)
+        
+      - step: 7
+        component: Retry Manager
+        action: Max attempts reached
+        
+      - step: 8
+        component: Dead Letter Publisher
+        action: Publica em notifications.failed
+        
+      - step: 9
+        component: Admin Notifier
+        action: |
+          - Envia alerta para admin (Telegram)
+          - Inclui payload original e erro
+          
+      - step: 10
+        component: Metrics
+        action: notifications_failed{channel="telegram"} +1
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 11. MÉTRICAS E OBSERVABILIDADE                               │
+# └─────────────────────────────────────────────────────────────┘
+
+metrics:
+  prometheus_endpoint: /metrics
+  port: 9090
+  
+  counters:
+    - name: notifications_received_total
+      help: Total de notificações recebidas do Kafka
+      labels: [category, priority]
+      
+    - name: notifications_sent_total
+      help: Total de notificações enviadas com sucesso
+      labels: [channel, category, priority]
+      
+    - name: notifications_failed_total
+      help: Total de notificações que falharam definitivamente
+      labels: [channel, category, error_type]
+      
+    - name: notifications_retries_total
+      help: Total de retentativas realizadas
+      labels: [channel, attempt]
+      
+    - name: notifications_throttled_total
+      help: Total de notificações throttled
+      labels: [channel]
+      
+    - name: notifications_batched_total
+      help: Total de notificações agrupadas em batch
+      labels: [category]
+      
+  histograms:
+    - name: notification_send_duration_seconds
+      help: Duração do envio de notificação
+      labels: [channel, category]
+      buckets: [0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0]
+      
+    - name: notification_processing_duration_seconds
+      help: Duração total do processamento (Kafka → Envio)
+      labels: [channel]
+      buckets: [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+      
+  gauges:
+    - name: notification_queue_size
+      help: Tamanho atual da fila de batching
+      labels: [category]
+      
+    - name: channels_healthy
+      help: Número de canais saudáveis (1=healthy, 0=unhealthy)
+      labels: [channel]
+
+  logging:
+    format: JSON (structured logging)
+    level: INFO (configurável via env)
+    fields:
+      - timestamp
+      - level
+      - message
+      - channel
+      - category
+      - notification_id
+      - user_id
+      - duration_ms
+      - error (if any)
+
+  tracing:
+    enabled: true
+    library: tracing / tracing-subscriber
+    spans:
+      - name: handle_notification
+        fields: [notification_id, category, channel]
+      - name: format_message
+        fields: [template, category]
+      - name: send_to_channel
+        fields: [channel, attempt]
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 12. INSTRUÇÕES DE DESENVOLVIMENTO                            │
+# └─────────────────────────────────────────────────────────────┘
+
+development_instructions:
+  setup:
+    prerequisites:
+      - Rust 1.75+ (rustup)
+      - Docker & Docker Compose
+      - Redis client (redis-cli para debug)
+      - Kafka client (kafkacat/kcat para debug)
+      
+    steps:
+      - step: 1
+        action: Clone o repositório
+        command: git clone <repo-url> && cd crypto-notifications
+        
+      - step: 2
+        action: Copie o arquivo de configuração
+        command: cp .env.example .env
+        
+      - step: 3
+        action: Configure as variáveis de ambiente
+        details: |
+          Edite .env e configure:
+          - TELEGRAM_BOT_TOKEN (obtenha com @BotFather)
+          - TELEGRAM_CHAT_ID (seu chat ID)
+          - Outras credenciais conforme necessário
+          
+      - step: 4
+        action: Inicie dependências
+        command: docker-compose up -d kafka redis
+        
+      - step: 5
+        action: Instale dependências Rust
+        command: cargo build
+        
+      - step: 6
+        action: Execute o serviço
+        command: cargo run
+        
+  testing_notifications:
+    manual_test:
+      description: Enviar mensagem de teste para o Kafka
+      command: |
+        echo '{
+          "channel": "telegram",
+          "priority": "high",
+          "category": "position",
+          "title": "Test Position",
+          "message": "Test message",
+          "data": {
+            "symbol": "BTCUSDT",
+            "side": "LONG",
+            "quantity": 0.01,
+            "entry_price": 45000
+          },
+          "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+        }' | kcat -P -b localhost:9092 -t notifications.send
+        
+    curl_test:
+      description: Testar via API (se implementado endpoint de teste)
+      command: |
+        curl -X POST http://localhost:8080/test/notification \
+          -H "Content-Type: application/json" \
+          -d '{
+            "channel": "telegram",
+            "category": "alert",
+            "message": "Test alert"
+          }'
+          
+  debugging:
+    logs:
+      command: RUST_LOG=debug cargo run
+      
+    kafka_monitoring:
+      consumer_lag: |
+        kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+          --group crypto-notifications-group --describe
+          
+      topic_messages: |
+        kcat -C -b localhost:9092 -t notifications.send -o beginning
+        
+    redis_monitoring:
+      check_throttle_keys: |
+        redis-cli KEYS "throttle:*"
+        
+      inspect_key: |
+        redis-cli HGETALL "throttle:telegram:user_123"
+        
+  hot_reload:
+    tool: cargo-watch
+    install: cargo install cargo-watch
+    command: cargo watch -x run
+    
+  linting:
+    clippy: cargo clippy -- -D warnings
+    format: cargo fmt --check
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 13. TROUBLESHOOTING                                          │
+# └─────────────────────────────────────────────────────────────┘
+
+troubleshooting:
+  common_issues:
+    - issue: "Notificações não sendo enviadas"
+      causes:
+        - Kafka consumer não conectado
+        - Token do Telegram inválido
+        - Rate limit atingido
+        - Redis não disponível
+      solutions:
+        - Verificar logs: RUST_LOG=debug cargo run
+        - Testar conectividade: cargo run --bin health-check
+        - Validar configuração: cargo run --bin validate-config
+        - Verificar métricas: curl localhost:9090/metrics
+        
+    - issue: "Rate limit errors constantes"
+      causes:
+        - Muitas notificações em curto período
+        - Throttling configurado muito restritivo
+      solutions:
+        - Aumentar capacidade do token bucket
+        - Habilitar/ajustar batching
+        - Revisar prioridades das mensagens
+        
+    - issue: "Mensagens duplicadas"
+      causes:
+        - Consumer offset não commitado
+        - Retry sem idempotência
+      solutions:
+        - Verificar consumer group lag
+        - Implementar deduplicação via Redis
+        - Configurar enable.auto.commit=true
+        
+    - issue: "Formatação incorreta"
+      causes:
+        - Template não encontrado
+        - Dados faltando no payload
+        - Sintaxe handlebars inválida
+      solutions:
+        - Verificar logs de template rendering
+        - Validar payload contra schema
+        - Testar template isoladamente
+        
+  health_checks:
+    service_health:
+      endpoint: GET /health
+      expected_response: |
+        {
+          "status": "healthy",
+          "version": "1.0.0",
+          "uptime_seconds": 3600,
+          "channels": {
+            "telegram": "healthy",
+            "discord": "healthy",
+            "email": "degraded"
+          },
+          "dependencies": {
+            "kafka": "connected",
+            "redis": "connected"
+          }
+        }
+        
+    channel_health:
+      telegram: |
+        curl -X GET "https://api.telegram.org/bot<TOKEN>/getMe"
+        
+      discord: |
+        curl -X GET "<WEBHOOK_URL>"
+        
+  log_analysis:
+    error_patterns:
+      - pattern: "SendFailed.*telegram.*401"
+        meaning: Token inválido
+        action: Revisar TELEGRAM_BOT_TOKEN
+        
+      - pattern: "SendFailed.*429"
+        meaning: Rate limit
+        action: Aumentar throttling ou aguardar
+        
+      - pattern: "DeserializationError"
+        meaning: Payload inválido do Kafka
+        action: Verificar schema do producer
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 14. ROADMAP & MELHORIAS FUTURAS                              │
+# └─────────────────────────────────────────────────────────────┘
+
+roadmap:
+  v1_0:
+    status: Current
+    features:
+      - ✅ Telegram integration
+      - ✅ Discord integration
+      - ✅ Email support
+      - ✅ Basic throttling
+      - ✅ Retry mechanism
+      - ✅ Template system
+      
+  v1_1:
+    planned_features:
+      - User preferences management (DB)
+      - Advanced batching strategies
+      - SMS support (Twilio)
+      - Push notifications (FCM)
+      - A/B testing de templates
+      
+  v2_0:
+    planned_features:
+      - Multi-language support (i18n)
+      - Rich analytics dashboard
+      - Notification scheduling
+      - Interactive notifications (buttons, actions)
+      - AI-powered message optimization
+      - Custom notification rules engine
+      
+  future_considerations:
+    - WebSocket support para notificações real-time
+    - Mobile app integration
+    - Voice notifications (phone calls)
+    - Integration com ferramentas de BI
+    - Machine learning para detectar spam patterns
+    - GraphQL API para consulta de histórico
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 15. REFERÊNCIAS E DOCUMENTAÇÃO                               │
+# └─────────────────────────────────────────────────────────────┘
+
+references:
+  external_apis:
+    telegram:
+      - name: Telegram Bot API
+        url: https://core.telegram.org/bots/api
+        docs: https://core.telegram.org/bots
+        
+    discord:
+      - name: Discord Webhooks
+        url: https://discord.com/developers/docs/resources/webhook
+        
+    email:
+      - name: SMTP RFC
+        url: https://datatracker.ietf.org/doc/html/rfc5321
+        
+  rust_libraries:
+    - name: Tokio
+      url: https://tokio.rs
+      
+    - name: rdkafka
+      url: https://docs.rs/rdkafka
+      
+    - name: Teloxide
+      url: https://docs.rs/teloxide
+      
+    - name: Handlebars
+      url: https://docs.rs/handlebars
+      
+  architecture_patterns:
+    - Event-Driven Architecture
+    - Hexagonal Architecture (Ports & Adapters)
+    - Domain-Driven Design (DDD)
+    - CQRS (Command Query Responsibility Segregation)
+    - Plugin Architecture
+    - Circuit Breaker Pattern
+    - Token Bucket Algorithm
+    - Exponential Backoff
+
+
+# ════════════════════════════════════════════════════════════════
+# FIM DO PROJECT MAP
+# ════════════════════════════════════════════════════════════════

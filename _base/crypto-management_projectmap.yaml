@@ -1,0 +1,1767 @@
+# ════════════════════════════════════════════════════════════════
+# CRYPTO-MANAGEMENT - PROJECT MAP
+# ════════════════════════════════════════════════════════════════
+# Sistema central de orquestração e gerenciamento de trading
+# Linguagem: Rust
+# Versão: 1.0.0
+# ════════════════════════════════════════════════════════════════
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 1. OVERVIEW DO PROJETO                                      │
+# └─────────────────────────────────────────────────────────────┘
+
+project:
+  name: crypto-management
+  description: |
+    Serviço central responsável por orquestrar todo o sistema de trading.
+    Atua como o "cérebro" do sistema, coordenando componentes, gerenciando
+    estado central, aplicando risk management, e controlando estratégias.
+    
+    Características principais:
+    - Orquestração central de componentes
+    - Gerenciamento de posições (abertas/fechadas)
+    - Auto-discovery de assets (detecta trades manuais)
+    - Risk management central (limites, drawdown, exposição)
+    - Controle de estratégias (enable/disable, configuração)
+    - Controle de modo de operação (PAPER/LIVE/DRY_RUN)
+    - Cálculo de P&L em tempo real
+    - Monitoramento de saúde do sistema
+    - Estado centralizado e source of truth
+    - Dashboard e APIs de controle
+
+  language: Rust
+  async_runtime: tokio
+  message_broker: Kafka (rdkafka)
+  database: Postgres (repositório central)
+  cache: Redis (estado em tempo real)
+  
+  responsibilities:
+    - Orquestrar componentes do sistema
+    - Gerenciar posições (tracking, P&L)
+    - Detectar trades manuais (auto-discovery)
+    - Aplicar risk management central
+    - Controlar subscrições de assets (crypto-listener)
+    - Gerenciar estratégias (enable/disable, params)
+    - Controlar modo de operação (PAPER/LIVE)
+    - Calcular métricas globais (drawdown, exposição)
+    - Prover APIs de consulta e controle
+    - Manter estado centralizado do sistema
+    - Coordenar shutdown graceful
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 2. ARQUITETURA                                               │
+# └─────────────────────────────────────────────────────────────┘
+
+architecture:
+  pattern: Event-Driven + Hexagonal Architecture + DDD + CQRS
+  role: Central Orchestrator (Brain of the System)
+  
+  components:
+    event_consumer:
+      description: Consome eventos de múltiplos tópicos
+      technology: rdkafka
+      topics:
+        - orders.events (crypto-trader)
+        - signals.buy/sell (crypto-signals, crypto-webhook)
+        - crypto-listener.prices (para auto-discovery)
+      concurrency: Multi-threaded tokio tasks
+      
+    position_manager:
+      description: Gerencia posições abertas e fechadas
+      features:
+        - Tracking de posições em tempo real
+        - Cálculo de P&L (realizado e não realizado)
+        - Detecção de novas posições (auto-discovery)
+        - Fechamento de posições
+        - Histórico completo
+      state: Redis (real-time) + Postgres (persistent)
+      
+    risk_manager:
+      description: Aplica regras de risk management
+      validations:
+        - Exposição por asset (max_exposure_per_asset)
+        - Exposição total (max_total_exposure)
+        - Drawdown máximo (max_drawdown)
+        - Loss diário (max_daily_loss)
+        - Número de posições (max_open_positions)
+      enforcement: Rejeita sinais que violam regras
+      
+    auto_discovery:
+      description: Detecta trades manuais na exchange
+      methods:
+        - User Data Stream (Binance WebSocket)
+        - Polling de posições (fallback)
+        - Reconciliação com ordens conhecidas
+      actions:
+        - Emite management.positions.opened
+        - Emite crypto-listener.subscribe
+        - Atribui estratégia (se configurado)
+        
+    strategy_controller:
+      description: Controla estratégias ativas
+      features:
+        - Enable/disable estratégias
+        - Atualizar parâmetros
+        - Atribuir estratégias a symbols
+        - Configurar confidence mínima
+      commands: Publica em management.control.strategy
+      
+    mode_controller:
+      description: Controla modo de operação
+      modes:
+        - PAPER: simulação completa
+        - LIVE: execução real
+        - DRY_RUN: valida mas não executa
+      commands: Publica em management.control.mode
+      
+    pnl_calculator:
+      description: Calcula P&L em tempo real
+      metrics:
+        - P&L realizado (posições fechadas)
+        - P&L não realizado (posições abertas)
+        - P&L diário, semanal, mensal
+        - Drawdown atual
+        - Profit factor
+        
+    subscription_coordinator:
+      description: Coordena subscrições de assets
+      logic: |
+        Quando posição é aberta → subscribe no crypto-listener
+        Quando posição é fechada → unsubscribe
+      topics:
+        - crypto-listener.subscribe
+        - crypto-listener.unsubscribe
+        
+    health_monitor:
+      description: Monitora saúde de componentes
+      checks:
+        - Kafka connectivity
+        - Database connectivity
+        - Redis connectivity
+        - Services responsiveness
+      interval: 30 seconds
+      
+    command_handler:
+      description: Processa comandos via API ou Kafka
+      commands:
+        - EnableStrategy, DisableStrategy
+        - UpdateRiskLimits
+        - ChangeMode
+        - ClosePosition
+        - EmergencyStop
+        
+    event_publisher:
+      description: Publica eventos de gerenciamento
+      topics:
+        - management.positions.opened
+        - management.positions.closed
+        - management.positions.updated
+        - management.control.strategy
+        - management.control.risk
+        - management.control.mode
+        
+    metrics:
+      description: Coleta métricas
+      technology: Prometheus (rust-prometheus)
+      
+  data_flow: |
+    [External Events] → Event Consumer → Position Manager → Risk Manager → 
+                                           ↓
+                                    Auto Discovery ← [Exchange User Data]
+                                           ↓
+                                    Strategy Controller
+                                           ↓
+                                    Event Publisher → Kafka
+                                           ↓
+                                    State Store (Redis + Postgres)
+                                           ↓
+                                    Metrics
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 3. TÓPICOS KAFKA                                             │
+# └─────────────────────────────────────────────────────────────┘
+
+kafka_topics:
+  consumed:
+    - name: orders.events
+      description: Eventos de ordens do crypto-trader
+      producer: crypto-trader
+      
+      event_types:
+        - CREATED: ordem criada
+        - FILLED: ordem executada completamente
+        - PARTIAL_FILL: ordem parcialmente executada
+        - CANCELLED: ordem cancelada
+        - REJECTED: ordem rejeitada
+        
+      use_case: |
+        - FILLED → Atualizar posição ou criar nova
+        - REJECTED → Registrar falha, atualizar métricas
+        
+    - name: signals.buy
+      description: Sinais de compra
+      producers: [crypto-signals, crypto-webhook]
+      
+      use_case: |
+        - Validar contra risk limits
+        - Aprovar ou rejeitar
+        - Se aprovado: encaminhar para crypto-trader
+        
+    - name: signals.sell
+      description: Sinais de venda
+      producers: [crypto-signals, crypto-webhook]
+      
+      use_case: Similar a signals.buy
+      
+    - name: crypto-listener.prices
+      description: Preços em tempo real (para P&L não realizado)
+      producer: crypto-listener
+      
+      use_case: |
+        - Atualizar P&L de posições abertas
+        - Detectar quando asset não subscrito ainda tem posição
+
+  produced:
+    - name: management.positions.opened
+      description: Nova posição foi aberta
+      consumers: [crypto-signals, crypto-notifications]
+      
+      schema:
+        position_id: UUID
+        symbol: string
+        side: enum [LONG, SHORT]
+        quantity: number
+        entry_price: number
+        source: enum [manual, automated]
+        strategy_assigned: optional string
+        timestamp: ISO8601
+        
+      example_payload: |
+        {
+          "position_id": "550e8400-e29b-41d4-a716-446655440000",
+          "symbol": "BTCUSDT",
+          "side": "LONG",
+          "quantity": 0.01,
+          "entry_price": 45000.00,
+          "source": "manual",
+          "strategy_assigned": "RSI_DIVERGENCE",
+          "timestamp": "2025-10-16T22:00:00Z"
+        }
+        
+    - name: management.positions.closed
+      description: Posição foi fechada
+      consumers: [crypto-notifications]
+      
+      schema:
+        position_id: UUID
+        symbol: string
+        exit_price: number
+        pnl: number (valor absoluto)
+        pnl_percent: number
+        duration: string (formato: "2h 30m")
+        reason: enum [strategy, manual, stop_loss, take_profit, emergency]
+        timestamp: ISO8601
+        
+      example_payload: |
+        {
+          "position_id": "550e8400-...",
+          "symbol": "BTCUSDT",
+          "exit_price": 47000.00,
+          "pnl": 20.00,
+          "pnl_percent": 4.44,
+          "duration": "2h 30m",
+          "reason": "strategy",
+          "timestamp": "2025-10-17T00:30:00Z"
+        }
+        
+    - name: management.positions.updated
+      description: P&L de posição atualizado
+      consumers: [crypto-notifications]
+      frequency: Configurável (ex: a cada 1% de variação)
+      
+      schema:
+        position_id: UUID
+        symbol: string
+        unrealized_pnl: number
+        current_price: number
+        pnl_percent: number
+        
+    - name: management.control.strategy
+      description: Comandos de controle de estratégias
+      consumers: [crypto-signals, crypto-trader]
+      
+      schema:
+        action: enum [ENABLE, DISABLE, UPDATE_PARAMS]
+        strategy: string
+        symbols: array ou "ALL"
+        params: optional object
+        
+      example_payload: |
+        {
+          "action": "ENABLE",
+          "strategy": "RSI_DIVERGENCE",
+          "symbols": ["BTCUSDT", "ETHUSDT"],
+          "params": {
+            "rsi_period": 14,
+            "oversold": 30
+          }
+        }
+        
+    - name: management.control.risk
+      description: Atualização de parâmetros de risco
+      consumers: [crypto-trader]
+      
+      schema:
+        action: enum [UPDATE_LIMITS, HALT_TRADING, RESUME_TRADING]
+        max_exposure_per_asset: optional number
+        max_total_exposure: optional number
+        max_daily_loss: optional number
+        max_drawdown: optional number
+        
+    - name: management.control.mode
+      description: Mudança de modo de operação
+      consumers: [crypto-trader]
+      
+      schema:
+        mode: enum [PAPER, LIVE, DRY_RUN]
+        timestamp: ISO8601
+        
+    - name: crypto-listener.subscribe
+      description: Solicita subscrição de asset
+      consumers: [crypto-listener]
+      
+      schema:
+        symbol: string
+        source: enum [position_opened, manual, strategy]
+        priority: enum [high, normal]
+        
+    - name: crypto-listener.unsubscribe
+      description: Solicita cancelamento de subscrição
+      consumers: [crypto-listener]
+      
+      schema:
+        symbol: string
+        reason: enum [position_closed, manual]
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 4. MAPA DE PASTAS                                            │
+# └─────────────────────────────────────────────────────────────┘
+
+project_structure:
+  description: Estrutura completa do projeto com descrição de cada módulo
+  architecture_layers: |
+    Presentation → Application → Domain
+                       ↓
+                Infrastructure
+    
+    - Domain: não depende de ninguém (núcleo puro)
+    - Application: depende apenas de Domain
+    - Infrastructure: implementa contratos de Application
+    - Presentation: usa Application e injeta Infrastructure via DI
+    
+  structure: |
+    crypto-management/
+    ├── src/
+    │   ├── main.rs                          # Entry point: bootstrap do app (config, consumers, orchestration, HTTP server)
+    │   ├── lib.rs                           # Biblioteca pública expondo módulos principais
+    │   │
+    │   ├── domain/                          # ⭐ Camada de Domínio (regras de negócio puras, sem I/O)
+    │   │   ├── mod.rs
+    │   │   ├── errors.rs                    # Erros de domínio (RiskViolationError, PositionError)
+    │   │   ├── aggregates/                  # Agregados DDD
+    │   │   │   ├── mod.rs
+    │   │   │   ├── position.rs              # PositionAggregate (calcula P&L, valida)
+    │   │   │   ├── portfolio.rs             # PortfolioAggregate (gerencia todas posições)
+    │   │   │   ├── risk_profile.rs          # RiskProfileAggregate (limites, drawdown)
+    │   │   │   └── system_state.rs          # SystemStateAggregate (modo, health)
+    │   │   ├── entities/                    # Entidades de domínio
+    │   │   │   ├── mod.rs
+    │   │   │   ├── position.rs              # Entidade Position
+    │   │   │   ├── trade.rs                 # Entidade Trade (entrada ou saída)
+    │   │   │   ├── asset_subscription.rs    # Entidade AssetSubscription
+    │   │   │   └── strategy_config.rs       # Entidade StrategyConfig
+    │   │   ├── events/                      # Domain events
+    │   │   │   ├── mod.rs
+    │   │   │   ├── position_events.rs       # PositionOpened, PositionClosed, PositionUpdated
+    │   │   │   ├── portfolio_events.rs      # PortfolioRebalanced, DrawdownReached
+    │   │   │   ├── risk_events.rs           # RiskLimitUpdated, RiskViolated
+    │   │   │   └── system_events.rs         # ModeChanged, StrategyEnabled
+    │   │   ├── repositories/                # Traits de repositórios (contratos)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── position_repository.rs   # Contrato para persistir posições
+    │   │   │   ├── portfolio_repository.rs  # Contrato para portfolio
+    │   │   │   └── system_state_repository.rs # Contrato para estado do sistema
+    │   │   ├── services/                    # Serviços de domínio
+    │   │   │   ├── mod.rs
+    │   │   │   ├── pnl_calculator.rs        # Calcula P&L (realizado, não realizado)
+    │   │   │   ├── risk_validator.rs        # Valida contra regras de risco
+    │   │   │   ├── drawdown_calculator.rs   # Calcula drawdown
+    │   │   │   ├── exposure_calculator.rs   # Calcula exposição
+    │   │   │   └── position_matcher.rs      # Matcha ordens com posições
+    │   │   └── value_objects/               # Value objects
+    │   │       ├── mod.rs
+    │   │       ├── position_id.rs           # VO PositionId (UUID)
+    │   │       ├── symbol.rs                # VO Symbol
+    │   │       ├── position_side.rs         # VO PositionSide (LONG, SHORT)
+    │   │       ├── position_status.rs       # VO PositionStatus (OPEN, CLOSED)
+    │   │       ├── pnl.rs                   # VO PnL (valor + percentual)
+    │   │       ├── exposure.rs              # VO Exposure (por asset, total)
+    │   │       ├── drawdown.rs              # VO Drawdown
+    │   │       └── operation_mode.rs        # VO OperationMode (PAPER, LIVE, DRY_RUN)
+    │   │
+    │   ├── application/                     # ⭐ Camada de Aplicação (casos de uso, orquestração)
+    │   │   ├── mod.rs
+    │   │   ├── dtos/                        # Data Transfer Objects
+    │   │   │   ├── mod.rs
+    │   │   │   ├── commands.rs              # Command DTOs (OpenPositionCommand, ClosePositionCommand)
+    │   │   │   ├── position_dto.rs          # DTO para posições
+    │   │   │   ├── portfolio_dto.rs         # DTO para portfolio
+    │   │   │   ├── risk_status_dto.rs       # DTO para status de risco
+    │   │   │   ├── requests.rs              # HTTP request DTOs
+    │   │   │   └── responses.rs             # HTTP response DTOs
+    │   │   ├── ports/                       # ⚡ Ports (interfaces/contratos para adapters)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── event_consumer_port.rs   # Contrato para consumir eventos (Kafka)
+    │   │   │   ├── event_publisher_port.rs  # Contrato para publicar eventos
+    │   │   │   ├── position_store_port.rs   # Contrato para armazenar posições
+    │   │   │   ├── portfolio_store_port.rs  # Contrato para portfolio
+    │   │   │   ├── exchange_client_port.rs  # Contrato para consultar exchange
+    │   │   │   ├── price_stream_port.rs     # Contrato para stream de preços
+    │   │   │   └── state_cache_port.rs      # Contrato para cache de estado (Redis)
+    │   │   ├── orchestrators/               # Orquestradores de casos de uso complexos
+    │   │   │   ├── mod.rs
+    │   │   │   ├── position_orchestrator.rs # Orquestra: open → subscribe → notify
+    │   │   │   ├── auto_discovery_orchestrator.rs # Orquestra detecção de trades manuais
+    │   │   │   ├── risk_orchestrator.rs     # Orquestra validação de risco
+    │   │   │   └── shutdown_orchestrator.rs # Orquestra shutdown graceful
+    │   │   ├── queries/                     # Queries (CQRS read-side)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── get_portfolio_summary.rs # Query: resumo de portfolio
+    │   │   │   ├── get_active_positions.rs  # Query: posições abertas
+    │   │   │   ├── get_pnl_history.rs       # Query: histórico de P&L
+    │   │   │   ├── get_risk_status.rs       # Query: status de risco
+    │   │   │   └── get_system_health.rs     # Query: saúde do sistema
+    │   │   └── services/                    # Application services (casos de uso)
+    │   │       ├── mod.rs
+    │   │       ├── position_service.rs      # Caso de uso: gerenciar posições
+    │   │       ├── portfolio_service.rs     # Caso de uso: gerenciar portfolio
+    │   │       ├── risk_service.rs          # Caso de uso: gerenciar risco
+    │   │       ├── strategy_service.rs      # Caso de uso: controlar estratégias
+    │   │       └── system_service.rs        # Caso de uso: controlar sistema
+    │   │
+    │   ├── infrastructure/                  # ⭐ Camada de Infraestrutura (implementações técnicas)
+    │   │   ├── mod.rs
+    │   │   ├── bootstrap/                   # Inicialização de componentes
+    │   │   │   ├── mod.rs
+    │   │   │   ├── database.rs              # Setup de conexão Postgres + migrations
+    │   │   │   ├── redis.rs                 # Setup de conexão Redis
+    │   │   │   ├── kafka_consumer.rs        # Inicializa consumers Kafka (múltiplos tópicos)
+    │   │   │   ├── kafka_publisher.rs       # Inicializa publisher Kafka
+    │   │   │   └── exchange_client.rs       # Inicializa cliente da exchange
+    │   │   ├── config/                      # Configuração e settings
+    │   │   │   ├── mod.rs
+    │   │   │   ├── settings.rs              # Struct Settings + carregamento de env vars
+    │   │   │   ├── risk_config.rs           # Configurações de risco
+    │   │   │   └── strategy_config.rs       # Configurações de estratégias
+    │   │   ├── messaging/                   # Messaging
+    │   │   │   ├── mod.rs
+    │   │   │   ├── kafka_multi_consumer.rs  # Consumer de múltiplos tópicos
+    │   │   │   ├── kafka_event_publisher.rs # Publisher de eventos
+    │   │   │   ├── order_event_handler.rs   # Handler de eventos de ordem
+    │   │   │   ├── signal_event_handler.rs  # Handler de eventos de sinal
+    │   │   │   └── price_event_handler.rs   # Handler de eventos de preço
+    │   │   ├── auto_discovery/              # Auto-discovery de posições
+    │   │   │   ├── mod.rs
+    │   │   │   ├── user_data_stream.rs      # WebSocket user data da exchange
+    │   │   │   ├── position_detector.rs     # Detecta novas posições
+    │   │   │   └── reconciliation.rs        # Reconcilia posições conhecidas vs exchange
+    │   │   ├── persistence/                 # Persistência
+    │   │   │   ├── mod.rs
+    │   │   │   ├── postgres_position_repository.rs  # Store de posições
+    │   │   │   ├── postgres_portfolio_repository.rs # Store de portfolio
+    │   │   │   ├── postgres_system_state_repository.rs # Store de estado do sistema
+    │   │   │   ├── redis_state_cache.rs     # Cache de estado (posições, portfolio)
+    │   │   │   └── redis_subscription_store.rs # Store de subscrições ativas
+    │   │   ├── exchange/                    # Integração com exchange
+    │   │   │   ├── mod.rs
+    │   │   │   ├── binance_client.rs        # Cliente Binance (query positions, balances)
+    │   │   │   └── exchange_adapter.rs      # Adapter genérico
+    │   │   ├── risk/                        # Risk management
+    │   │   │   ├── mod.rs
+    │   │   │   ├── risk_validator.rs        # Validador de risco
+    │   │   │   └── risk_monitor.rs          # Monitor contínuo de risco
+    │   │   ├── metrics/                     # Métricas e observabilidade
+    │   │   │   ├── mod.rs
+    │   │   │   └── prometheus_metrics.rs    # Registra métricas Prometheus
+    │   │   ├── shutdown/                    # Shutdown graceful
+    │   │   │   ├── mod.rs
+    │   │   │   ├── graceful.rs              # Coordena shutdown de todos componentes
+    │   │   │   └── signal_handler.rs        # Captura sinais SIGTERM/SIGINT
+    │   │   └── startup/                     # Startup do aplicativo
+    │   │       ├── mod.rs
+    │   │       ├── banner.rs                # Banner ASCII no console
+    │   │       ├── health.rs                # Health checks
+    │   │       └── logging.rs               # Setup de logs (tracing-subscriber)
+    │   │
+    │   ├── presentation/                    # ⭐ Camada de Apresentação (HTTP REST API, WebSocket futuro)
+    │   │   ├── mod.rs
+    │   │   └── http/                        # HTTP REST API (Axum)
+    │   │       ├── mod.rs
+    │   │       ├── router.rs                # Definição de rotas (endpoints)
+    │   │       ├── responses.rs             # Helpers de resposta (ApiResponse, ErrorResponse)
+    │   │       ├── controllers/             # Controllers HTTP
+    │   │       │   ├── mod.rs
+    │   │       │   ├── position_controller.rs   # GET/POST positions, close, etc.
+    │   │       │   ├── portfolio_controller.rs  # GET portfolio summary, stats
+    │   │       │   ├── risk_controller.rs       # GET risk status, PUT update limits
+    │   │       │   ├── strategy_controller.rs   # POST enable/disable, PUT params
+    │   │       │   ├── system_controller.rs     # POST mode, emergency stop
+    │   │       │   └── health_controller.rs     # GET health, metrics
+    │   │       └── middleware/              # Middlewares HTTP
+    │   │           ├── mod.rs
+    │   │           ├── auth_middleware.rs   # Autenticação (futuro)
+    │   │           └── request_logger.rs    # Log de requests HTTP
+    │   │
+    │   └── shared/                          # ⭐ Shared Kernel (código transversal)
+    │       ├── mod.rs
+    │       ├── errors.rs                    # Erros compartilhados (ApplicationError, InfrastructureError)
+    │       ├── types.rs                     # Tipos compartilhados (EventEnvelope, Timestamp, etc.)
+    │       ├── traits/                      # Traits comuns
+    │       │   ├── mod.rs
+    │       │   └── aggregate_root.rs        # Trait AggregateRoot
+    │       └── utils/                       # Utilitários
+    │           ├── mod.rs
+    │           ├── datetime.rs              # Helpers de data/hora
+    │           ├── decimal.rs               # Helpers para aritmética decimal (P&L, preços)
+    │           └── validation.rs            # Validações genéricas
+    │
+    ├── config/                              # 📁 Configurações externas
+    │   ├── development.yaml                 # Config para ambiente dev
+    │   ├── production.yaml                  # Config para ambiente prod
+    │   └── risk_profiles/                   # Perfis de risco pré-definidos
+    │       ├── conservative.yaml            # Perfil conservador
+    │       ├── moderate.yaml                # Perfil moderado
+    │       └── aggressive.yaml              # Perfil agressivo
+    │
+    ├── migrations/                          # 📊 Migrações de banco (Flyway)
+    │   ├── V001__initial_schema.sql         # Schema inicial (positions, portfolio, system_state)
+    │   ├── V002__strategy_configs.sql       # Tabela de configurações de estratégias
+    │   ├── V003__risk_limits.sql            # Tabela de limites de risco
+    │   ├── V004__pnl_snapshots.sql          # Tabela de snapshots de P&L
+    │   └── V005__indexes.sql                # Índices para performance
+    │
+    ├── docs/                                # 📚 Documentação técnica
+    │   ├── README.md                        # Índice de documentação
+    │   ├── ARCHITECTURE.md                  # Detalhes da arquitetura
+    │   ├── RISK_MANAGEMENT.md               # Documentação de risk management
+    │   ├── AUTO_DISCOVERY.md                # Guia de auto-discovery
+    │   └── API.md                           # Documentação da API REST
+    │
+    ├── Cargo.toml                           # Configuração Rust (deps, features)
+    ├── Cargo.lock                           # Lock file de dependências
+    ├── Dockerfile                           # Build multi-stage production
+    ├── docker-compose.yml                   # Stack completa (app, Kafka, Postgres, Redis)
+    ├── Makefile                             # Comandos make (build, test, docker)
+    ├── crypto-management_projectmap.yaml    # Este arquivo (documentação estruturada)
+    └── README.md                            # Documentação principal do projeto
+    
+  conventions:
+    domain_layer:
+      description: Camada de Domínio (domain/)
+      rules:
+        - ✅ Sem dependências de infraestrutura
+        - ✅ Lógica de negócio pura (P&L, risk validation, etc.)
+        - ✅ Aggregates aplicam eventos e validam invariantes
+        - ✅ Value objects imutáveis com validação
+        - ✅ Services de domínio para lógica cross-aggregate
+        - ✅ Repositories como traits (contratos apenas)
+        
+    application_layer:
+      description: Camada de Aplicação (application/)
+      rules:
+        - ✅ Define Ports (interfaces) que infraestrutura implementa
+        - ✅ Orquestra casos de uso complexos (via orchestrators)
+        - ✅ DTOs para comunicação entre camadas
+        - ✅ Queries para read-side (CQRS)
+        - ✅ Services orquestram múltiplos agregados/ports
+        - ✅ Não conhece detalhes de implementação
+        
+    infrastructure_layer:
+      description: Camada de Infraestrutura (infrastructure/)
+      rules:
+        - ✅ Implementa Adapters (Kafka, Postgres, Redis, Binance)
+        - ✅ Bootstrap e configuração
+        - ✅ Messaging (multi-consumer/publisher)
+        - ✅ Auto-discovery (user data stream)
+        - ✅ Persistence (Postgres + Redis cache)
+        - ✅ Shutdown graceful coordenado
+        - ✅ Startup e health checks
+        
+    presentation_layer:
+      description: Camada de Apresentação (presentation/)
+      rules:
+        - ✅ HTTP REST API (Axum)
+        - ✅ Controllers e routers
+        - ✅ Conversão DTOs <-> JSON
+        - ✅ Middlewares (logging, auth futuro)
+        - ✅ Não contém lógica de negócio
+        - ✅ Apenas coordena chamadas à Application
+        
+    shared_kernel:
+      description: Shared Kernel (shared/)
+      rules:
+        - ✅ Código compartilhado entre camadas
+        - ✅ Traits comuns (AggregateRoot)
+        - ✅ Tipos transversais (EventEnvelope)
+        - ✅ Utilitários (datetime, decimal, validação)
+        - ✅ Erros compartilhados
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 5. GERENCIAMENTO DE POSIÇÕES                                 │
+# └─────────────────────────────────────────────────────────────┘
+
+position_management:
+  concept: |
+    O crypto-management é o source of truth para posições. Mantém
+    registro de todas as posições abertas e fechadas, calcula P&L
+    em tempo real, e coordena subscrições de assets.
+    
+  position_lifecycle:
+    states:
+      - OPENING: Ordem de entrada sendo processada
+      - OPEN: Posição aberta e ativa
+      - CLOSING: Ordem de saída sendo processada
+      - CLOSED: Posição fechada
+      
+    transitions:
+      - step: 1
+        state: N/A → OPENING
+        trigger: Order event (CREATED) de ordem de entrada
+        
+      - step: 2
+        state: OPENING → OPEN
+        trigger: Order event (FILLED) de ordem de entrada
+        actions:
+          - Cria Position entity
+          - Calcula entry_price médio
+          - Emite management.positions.opened
+          - Emite crypto-listener.subscribe
+          - Atribui estratégia (se configurado)
+          
+      - step: 3
+        state: OPEN → CLOSING
+        trigger: Order event (CREATED) de ordem de saída
+        
+      - step: 4
+        state: CLOSING → CLOSED
+        trigger: Order event (FILLED) de ordem de saída
+        actions:
+          - Calcula P&L final
+          - Calcula duração
+          - Emite management.positions.closed
+          - Emite crypto-listener.unsubscribe
+          - Atualiza métricas
+          
+  position_structure:
+    fields:
+      - position_id: UUID
+      - symbol: string (ex: "BTCUSDT")
+      - side: enum [LONG, SHORT]
+      - quantity: decimal
+      - entry_price: decimal (preço médio de entrada)
+      - current_price: decimal (atualizado em tempo real)
+      - exit_price: optional decimal (quando fechada)
+      - realized_pnl: decimal (quando fechada)
+      - unrealized_pnl: decimal (enquanto aberta)
+      - pnl_percent: decimal
+      - status: enum [OPENING, OPEN, CLOSING, CLOSED]
+      - source: enum [manual, automated]
+      - strategy: optional string (estratégia atribuída)
+      - opened_at: timestamp
+      - closed_at: optional timestamp
+      - duration: optional duration
+      - stop_loss_price: optional decimal
+      - take_profit_price: optional decimal
+      - entry_order_ids: array of order IDs
+      - exit_order_ids: array of order IDs
+      
+  pnl_calculation:
+    unrealized_pnl:
+      description: P&L de posições abertas
+      formula_long: (current_price - entry_price) * quantity
+      formula_short: (entry_price - current_price) * quantity
+      update_frequency: A cada price update
+      
+    realized_pnl:
+      description: P&L de posições fechadas
+      formula_long: (exit_price - entry_price) * quantity - commissions
+      formula_short: (entry_price - exit_price) * quantity - commissions
+      
+    portfolio_pnl:
+      total_unrealized: Soma de unrealized_pnl de todas posições abertas
+      total_realized: Soma de realized_pnl de todas posições fechadas (período)
+      daily_pnl: total_realized do dia atual + total_unrealized
+      
+  position_tracking:
+    in_memory:
+      description: Estado de posições abertas (Redis)
+      key_pattern: "position:{symbol}"
+      ttl: Infinito (removido ao fechar)
+      
+    persistent:
+      description: Histórico completo (Postgres)
+      table: positions
+      indexed_by: [symbol, status, opened_at, closed_at]
+      
+  auto_update:
+    description: Atualização automática de P&L
+    trigger: Price update do crypto-listener.prices
+    logic: |
+      Se posição aberta para symbol:
+        - Atualiza current_price
+        - Recalcula unrealized_pnl
+        - Se variação > threshold (ex: 1%):
+          - Emite management.positions.updated
+          - Atualiza cache (Redis)
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 6. RISK MANAGEMENT                                           │
+# └─────────────────────────────────────────────────────────────┘
+
+risk_management:
+  concept: |
+    O crypto-management é o guardião de risco central. Valida todos
+    os sinais contra regras de risco antes de permitir execução.
+    
+  risk_limits:
+    max_exposure_per_asset:
+      description: Exposição máxima por asset
+      unit: USDT ou % do capital
+      default: 1000 USDT
+      calculation: Soma do valor de todas posições abertas do asset
+      validation: |
+        current_exposure = SUM(position.quantity * position.entry_price WHERE symbol = X)
+        new_exposure = current_exposure + (signal.quantity * signal.price)
+        if new_exposure > max_exposure_per_asset → REJECT
+        
+    max_total_exposure:
+      description: Exposição total máxima
+      unit: USDT ou % do capital
+      default: 5000 USDT
+      calculation: Soma do valor de todas posições abertas
+      validation: |
+        total_exposure = SUM(position.quantity * position.entry_price FOR ALL positions)
+        new_total = total_exposure + (signal.quantity * signal.price)
+        if new_total > max_total_exposure → REJECT
+        
+    max_drawdown:
+      description: Drawdown máximo permitido
+      unit: Percentual
+      default: -20%
+      calculation: |
+        peak_balance = Máximo balance histórico
+        current_balance = Balance atual
+        drawdown = (current_balance - peak_balance) / peak_balance
+      validation: |
+        if drawdown < max_drawdown → HALT_TRADING
+        
+    max_daily_loss:
+      description: Perda máxima diária
+      unit: USDT ou % do capital inicial do dia
+      default: -500 USDT
+      calculation: realized_pnl desde 00:00 UTC
+      validation: |
+        if daily_pnl < max_daily_loss → HALT_TRADING (até próximo dia)
+      reset: Diário às 00:00 UTC
+      
+    max_open_positions:
+      description: Número máximo de posições abertas
+      unit: Contador
+      default: 10
+      validation: |
+        if COUNT(positions WHERE status = OPEN) >= max_open_positions → REJECT
+        
+  risk_profiles:
+    conservative:
+      max_exposure_per_asset: 500 USDT
+      max_total_exposure: 2000 USDT
+      max_drawdown: -10%
+      max_daily_loss: -200 USDT
+      max_open_positions: 5
+      
+    moderate:
+      max_exposure_per_asset: 1000 USDT
+      max_total_exposure: 5000 USDT
+      max_drawdown: -20%
+      max_daily_loss: -500 USDT
+      max_open_positions: 10
+      
+    aggressive:
+      max_exposure_per_asset: 2000 USDT
+      max_total_exposure: 10000 USDT
+      max_drawdown: -30%
+      max_daily_loss: -1000 USDT
+      max_open_positions: 15
+      
+  risk_validation_flow:
+    description: Validação de sinal contra risk limits
+    steps:
+      - step: 1
+        action: Receber sinal (signals.buy ou signals.sell)
+        
+      - step: 2
+        action: Verificar modo de operação
+        logic: |
+          if mode == HALT_TRADING → REJECT (sistema pausado)
+          
+      - step: 3
+        action: Verificar exposição por asset
+        logic: Calcular exposure atual + novo sinal
+        
+      - step: 4
+        action: Verificar exposição total
+        logic: Calcular total exposure atual + novo sinal
+        
+      - step: 5
+        action: Verificar drawdown
+        logic: |
+          if current_drawdown < max_drawdown → REJECT
+          
+      - step: 6
+        action: Verificar loss diário
+        logic: |
+          if daily_pnl < max_daily_loss → REJECT
+          
+      - step: 7
+        action: Verificar número de posições
+        logic: |
+          if open_positions >= max_open_positions → REJECT
+          
+      - step: 8
+        action: Se todos passam → APPROVE
+        result: Encaminha sinal para crypto-trader
+        
+      - step: 9
+        action: Se algum falha → REJECT
+        result: |
+          - Emite evento de rejeição
+          - Registra razão
+          - Atualiza métricas
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 7. AUTO-DISCOVERY                                            │
+# └─────────────────────────────────────────────────────────────┘
+
+auto_discovery:
+  concept: |
+    Auto-discovery detecta quando você executa trades manualmente na
+    exchange (via app, web, ou outros bots) e automaticamente:
+    - Registra a posição no crypto-management
+    - Inicia subscrição de preços no crypto-listener
+    - Atribui estratégia (se configurado)
+    - Começa a monitorar para sinais de saída
+    
+  detection_methods:
+    user_data_stream:
+      description: WebSocket de user data da exchange (método principal)
+      technology: Binance User Data Stream
+      events:
+        - executionReport: Ordem executada
+        - balanceUpdate: Balance atualizado
+        - outboundAccountPosition: Posição atualizada
+      advantages:
+        - Tempo real
+        - Baixa latência
+        - Não consome rate limit
+      implementation: |
+        1. Conecta ao WebSocket user data
+        2. Escuta eventos executionReport
+        3. Se ordem não é conhecida (não em order_tracking):
+          → É trade manual
+        4. Cria Position entity
+        5. Emite management.positions.opened
+        
+    position_polling:
+      description: Polling periódico de posições (fallback)
+      technology: Binance REST API (GET /api/v3/account)
+      frequency: A cada 30 segundos
+      logic: |
+        1. Busca todas posições da exchange
+        2. Compara com posições conhecidas
+        3. Se nova posição:
+          → Trade manual detectado
+      disadvantages:
+        - Latência maior
+        - Consome rate limit
+      use_case: Backup se WebSocket falhar
+      
+  reconciliation:
+    description: Reconciliação periódica (garantir consistência)
+    frequency: A cada 5 minutos
+    logic: |
+      1. Busca posições da exchange
+      2. Busca posições do crypto-management
+      3. Identifica divergências:
+         - Posições na exchange mas não no management
+         - Posições no management mas não na exchange
+      4. Corrige divergências:
+         - Adiciona faltantes
+         - Remove inexistentes
+      5. Registra em logs para auditoria
+      
+  auto_discovery_flow:
+    steps:
+      - step: 1
+        component: User Data Stream (WebSocket)
+        action: Recebe executionReport event
+        
+      - step: 2
+        component: Position Detector
+        action: |
+          - Verifica se order_id é conhecido
+          - Se não: é trade manual
+          
+      - step: 3
+        component: Position Orchestrator
+        action: |
+          - Cria Position entity
+          - Define source = "manual"
+          - Calcula entry_price, quantity
+          
+      - step: 4
+        component: Strategy Assignment
+        action: |
+          - Verifica configuração de auto-assignment
+          - Se configurado: atribui estratégia ao symbol
+          - Senão: strategy = null
+          
+      - step: 5
+        component: Event Publisher
+        action: |
+          - Emite management.positions.opened
+          - Emite crypto-listener.subscribe
+          
+      - step: 6
+        component: Subscription Coordinator
+        action: |
+          - crypto-listener recebe subscribe
+          - Inicia stream de preços para symbol
+          
+      - step: 7
+        component: Notification
+        action: |
+          - Notifica via crypto-notifications
+          - "Manual position detected: LONG BTCUSDT @ 45000"
+          
+  configuration:
+    auto_discovery_enabled:
+      env: AUTO_DISCOVERY_ENABLED
+      default: true
+      
+    auto_assign_strategy:
+      env: AUTO_ASSIGN_STRATEGY
+      default: false
+      description: |
+        Se true: atribui estratégia configurada para symbol
+        Se false: posição manual sem estratégia
+        
+    strategy_assignment_map:
+      description: Mapeia symbols para estratégias
+      config: |
+        BTCUSDT: RSI_DIVERGENCE
+        ETHUSDT: MACD_CROSSOVER
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 8. FLUXOS PRINCIPAIS                                         │
+# └─────────────────────────────────────────────────────────────┘
+
+flows:
+  signal_validation:
+    description: Validação de sinal contra risk management
+    steps:
+      - step: 1
+        component: Kafka Consumer
+        action: Consome sinal de signals.buy
+        
+      - step: 2
+        component: Signal Event Handler
+        action: Deserializa e cria SignalDTO
+        
+      - step: 3
+        component: Risk Validator
+        action: |
+          - Busca risk limits atuais
+          - Busca posições abertas
+          - Calcula exposição atual
+          - Valida contra todos os limites
+        result: APPROVED ou REJECTED (com razão)
+        
+      - step: 4a (se APPROVED)
+        component: Signal Forwarder
+        action: |
+          - Encaminha sinal para crypto-trader
+          - Registra aprovação
+          - Atualiza métricas: signals_approved_total
+          
+      - step: 4b (se REJECTED)
+        component: Rejection Handler
+        action: |
+          - Registra rejeição com razão
+          - Emite notificação (crypto-notifications)
+          - Atualiza métricas: signals_rejected_total
+          
+    example_trace: |
+      [Consumer] Signal: BUY BTCUSDT @ 45000
+      [RiskValidator] Current exposure BTCUSDT: 450/1000 ✓
+      [RiskValidator] Total exposure: 2500/5000 ✓
+      [RiskValidator] Drawdown: -5%/-20% ✓
+      [RiskValidator] Daily loss: -50/-500 ✓
+      [RiskValidator] Open positions: 3/10 ✓
+      [Result] APPROVED
+      [Forwarder] Signal forwarded to crypto-trader
+      [Metrics] signals_approved_total +1
+
+  position_opened:
+    description: Fluxo quando ordem de entrada é executada
+    steps:
+      - step: 1
+        component: Kafka Consumer
+        action: Consome orders.events (FILLED) de ordem de compra
+        
+      - step: 2
+        component: Order Event Handler
+        action: |
+          - Identifica que é ordem de entrada (não há posição aberta)
+          - Cria ou atualiza Position entity
+          
+      - step: 3
+        component: Position Service
+        action: |
+          - Calcula entry_price médio (se múltiplas ordens)
+          - Define status = OPEN
+          - Persiste posição (Postgres + Redis)
+          
+      - step: 4
+        component: Event Publisher
+        action: Emite management.positions.opened
+        
+      - step: 5
+        component: Subscription Coordinator
+        action: Emite crypto-listener.subscribe
+        
+      - step: 6
+        component: Notification
+        action: Envia notificação via crypto-notifications
+        
+      - step: 7
+        component: Metrics
+        action: |
+          - positions_opened_total{symbol="BTCUSDT"} +1
+          - active_positions{symbol="BTCUSDT"} = 1
+
+  position_closed:
+    description: Fluxo quando ordem de saída é executada
+    steps:
+      - step: 1
+        component: Kafka Consumer
+        action: Consome orders.events (FILLED) de ordem de venda
+        
+      - step: 2
+        component: Order Event Handler
+        action: Identifica que é ordem de saída (posição aberta existe)
+        
+      - step: 3
+        component: PnL Calculator
+        action: |
+          - Calcula realized_pnl final
+          - Calcula pnl_percent
+          - Calcula duration
+          
+      - step: 4
+        component: Position Service
+        action: |
+          - Atualiza Position: status = CLOSED
+          - Define exit_price, realized_pnl, closed_at
+          - Persiste (Postgres)
+          - Remove do Redis (posição não ativa)
+          
+      - step: 5
+        component: Event Publisher
+        action: Emite management.positions.closed
+        
+      - step: 6
+        component: Subscription Coordinator
+        action: Emite crypto-listener.unsubscribe
+        
+      - step: 7
+        component: Portfolio Service
+        action: |
+          - Atualiza total_realized_pnl
+          - Atualiza win/loss counters
+          - Atualiza drawdown (se loss)
+          
+      - step: 8
+        component: Notification
+        action: |
+          Envia notificação:
+          "Position closed: BTCUSDT +4.5% profit in 2h 30m"
+          
+      - step: 9
+        component: Metrics
+        action: |
+          - positions_closed_total{symbol="BTCUSDT",result="win"} +1
+          - active_positions{symbol="BTCUSDT"} = 0
+
+  auto_discovery:
+    description: Fluxo de detecção de trade manual
+    steps:
+      - step: 1
+        component: User Data Stream (WebSocket)
+        action: Recebe executionReport de ordem desconhecida
+        
+      - step: 2
+        component: Position Detector
+        action: |
+          - Verifica order tracking
+          - Identifica como trade manual
+          
+      - step: 3
+        component: Auto Discovery Orchestrator
+        action: |
+          - Cria Position entity (source = "manual")
+          - Atribui estratégia (se configurado)
+          
+      - step: 4
+        component: Event Publisher
+        action: |
+          - Emite management.positions.opened
+          - Emite crypto-listener.subscribe
+          
+      - step: 5
+        component: Notification
+        action: |
+          "🔍 Auto-discovery: Manual LONG detected on BTCUSDT @ 45000"
+
+  strategy_enable:
+    description: Habilitar estratégia via API
+    steps:
+      - step: 1
+        component: HTTP API
+        action: |
+          POST /api/strategies/RSI_DIVERGENCE/enable
+          Body: {"symbols": ["BTCUSDT", "ETHUSDT"]}
+          
+      - step: 2
+        component: Strategy Controller
+        action: |
+          - Valida estratégia existe
+          - Valida symbols
+          - Atualiza configuração
+          
+      - step: 3
+        component: Strategy Repository
+        action: Persiste configuração
+        
+      - step: 4
+        component: Event Publisher
+        action: |
+          Emite management.control.strategy
+          {
+            "action": "ENABLE",
+            "strategy": "RSI_DIVERGENCE",
+            "symbols": ["BTCUSDT", "ETHUSDT"]
+          }
+          
+      - step: 5
+        component: crypto-signals (consumer)
+        action: |
+          - Recebe evento
+          - Ativa estratégia RSI_DIVERGENCE
+          - Começa análise para BTCUSDT e ETHUSDT
+
+  emergency_stop:
+    description: Parada de emergência do sistema
+    steps:
+      - step: 1
+        component: HTTP API ou comando manual
+        action: POST /api/system/emergency-stop
+        
+      - step: 2
+        component: System Controller
+        action: |
+          - Define mode = HALT_TRADING
+          - Cancela ordens pendentes (crypto-trader)
+          - Para aceitação de novos sinais
+          
+      - step: 3
+        component: Event Publisher
+        action: |
+          - Emite management.control.risk (HALT_TRADING)
+          - Emite management.control.mode (se necessário)
+          
+      - step: 4
+        component: Notification
+        action: |
+          "🚨 EMERGENCY STOP: Trading halted"
+          
+      - step: 5
+        component: crypto-trader
+        action: |
+          - Recebe evento
+          - Cancela ordens pendentes
+          - Para de aceitar novos sinais
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 9. CONFIGURAÇÃO                                              │
+# └─────────────────────────────────────────────────────────────┘
+
+configuration:
+  format: YAML + Environment Variables
+  precedence: ENV > config file > defaults
+  
+  files:
+    development: config/development.yaml
+    production: config/production.yaml
+    risk_profiles: config/risk_profiles/*.yaml
+    
+  structure:
+    mode:
+      env: OPERATION_MODE
+      values: [PAPER, LIVE, DRY_RUN]
+      default: PAPER
+      
+    kafka:
+      brokers:
+        env: KAFKA_BROKERS
+        default: "localhost:9092"
+      consumer_group:
+        env: KAFKA_CONSUMER_GROUP
+        default: "crypto-management-group"
+      topics:
+        orders_events: "orders.events"
+        signals_buy: "signals.buy"
+        signals_sell: "signals.sell"
+        prices: "crypto-listener.prices"
+        
+    redis:
+      url:
+        env: REDIS_URL
+        default: "redis://localhost:6379"
+      pool_size: 10
+      
+    database:
+      url:
+        env: DATABASE_URL
+        required: true
+      pool_size: 10
+      
+    exchange:
+      name:
+        env: EXCHANGE_NAME
+        default: "binance"
+      api_key:
+        env: EXCHANGE_API_KEY
+        required: true
+      api_secret:
+        env: EXCHANGE_API_SECRET
+        required: true
+      testnet:
+        env: EXCHANGE_TESTNET
+        default: false
+        
+    risk:
+      profile:
+        env: RISK_PROFILE
+        default: "moderate"
+        values: [conservative, moderate, aggressive, custom]
+      max_exposure_per_asset:
+        env: RISK_MAX_EXPOSURE_PER_ASSET
+        default: 1000.00
+      max_total_exposure:
+        env: RISK_MAX_TOTAL_EXPOSURE
+        default: 5000.00
+      max_drawdown:
+        env: RISK_MAX_DRAWDOWN
+        default: -0.20
+      max_daily_loss:
+        env: RISK_MAX_DAILY_LOSS
+        default: 500.00
+      max_open_positions:
+        env: RISK_MAX_OPEN_POSITIONS
+        default: 10
+        
+    auto_discovery:
+      enabled:
+        env: AUTO_DISCOVERY_ENABLED
+        default: true
+      method:
+        env: AUTO_DISCOVERY_METHOD
+        values: [user_data_stream, polling, both]
+        default: "user_data_stream"
+      polling_interval_seconds:
+        env: AUTO_DISCOVERY_POLLING_INTERVAL
+        default: 30
+      reconciliation_interval_seconds:
+        env: RECONCILIATION_INTERVAL
+        default: 300  # 5 minutos
+      auto_assign_strategy:
+        env: AUTO_ASSIGN_STRATEGY
+        default: false
+        
+    pnl_update:
+      enable_realtime_updates:
+        env: PNL_REALTIME_UPDATES
+        default: true
+      update_threshold_percent:
+        env: PNL_UPDATE_THRESHOLD
+        default: 1.0  # Emite evento a cada 1% de variação
+        
+    metrics:
+      enabled:
+        env: METRICS_ENABLED
+        default: true
+      port:
+        env: METRICS_PORT
+        default: 9090
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 10. MÉTRICAS E OBSERVABILIDADE                               │
+# └─────────────────────────────────────────────────────────────┘
+
+metrics:
+  prometheus_endpoint: /metrics
+  port: 9090
+  
+  counters:
+    - name: signals_received_total
+      help: Total de sinais recebidos
+      labels: [symbol, side, source]
+      
+    - name: signals_approved_total
+      help: Total de sinais aprovados após validação de risco
+      labels: [symbol, side]
+      
+    - name: signals_rejected_total
+      help: Total de sinais rejeitados
+      labels: [symbol, reason]
+      
+    - name: positions_opened_total
+      help: Total de posições abertas
+      labels: [symbol, side, source]
+      
+    - name: positions_closed_total
+      help: Total de posições fechadas
+      labels: [symbol, result]
+      
+    - name: trades_detected_manual_total
+      help: Total de trades manuais detectados via auto-discovery
+      labels: [symbol]
+      
+    - name: risk_violations_total
+      help: Total de violações de risco detectadas
+      labels: [rule]
+      
+  histograms:
+    - name: position_duration_seconds
+      help: Duração de posições fechadas
+      labels: [symbol]
+      buckets: [60, 300, 900, 1800, 3600, 7200, 14400, 28800]
+      
+    - name: position_pnl
+      help: P&L de posições fechadas
+      labels: [symbol]
+      buckets: [-1000, -500, -100, 0, 100, 500, 1000, 5000]
+      
+  gauges:
+    - name: active_positions
+      help: Número de posições abertas
+      labels: [symbol]
+      
+    - name: total_exposure
+      help: Exposição total em USDT
+      labels: []
+      
+    - name: exposure_per_asset
+      help: Exposição por asset
+      labels: [symbol]
+      
+    - name: current_drawdown
+      help: Drawdown atual
+      labels: []
+      
+    - name: daily_pnl
+      help: P&L do dia atual
+      labels: []
+      
+    - name: total_unrealized_pnl
+      help: P&L não realizado total
+      labels: []
+      
+    - name: portfolio_balance
+      help: Balance total do portfolio
+      labels: [asset]
+
+  logging:
+    format: JSON (structured logging)
+    level: INFO (configurável via env)
+    fields:
+      - timestamp
+      - level
+      - message
+      - position_id
+      - symbol
+      - event_type
+      - pnl
+      - duration_ms
+      - error (if any)
+
+  tracing:
+    enabled: true
+    library: tracing / tracing-subscriber
+    spans:
+      - name: validate_signal
+        fields: [signal_id, symbol, validation_result]
+      - name: open_position
+        fields: [position_id, symbol, entry_price]
+      - name: close_position
+        fields: [position_id, symbol, pnl]
+      - name: auto_discovery
+        fields: [symbol, detection_method]
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 11. API REST                                                 │
+# └─────────────────────────────────────────────────────────────┘
+
+rest_api:
+  base_url: http://localhost:8080/api
+  
+  endpoints:
+    positions:
+      - method: GET
+        path: /positions
+        description: Lista todas as posições (abertas e fechadas)
+        query_params:
+          status: optional enum [OPEN, CLOSED]
+          symbol: optional string
+          limit: optional integer (default: 100)
+        response: |
+          {
+            "positions": [
+              {
+                "position_id": "uuid",
+                "symbol": "BTCUSDT",
+                "side": "LONG",
+                "quantity": 0.01,
+                "entry_price": 45000.00,
+                "current_price": 46500.00,
+                "unrealized_pnl": 15.00,
+                "pnl_percent": 3.33,
+                "status": "OPEN",
+                "opened_at": "2025-10-16T22:00:00Z"
+              }
+            ]
+          }
+          
+      - method: GET
+        path: /positions/{position_id}
+        description: Detalhes de uma posição específica
+        
+      - method: POST
+        path: /positions/{position_id}/close
+        description: Fecha posição manualmente
+        
+    portfolio:
+      - method: GET
+        path: /portfolio/summary
+        description: Resumo do portfolio
+        response: |
+          {
+            "total_balance": 12450.00,
+            "total_exposure": 2500.00,
+            "active_positions": 3,
+            "total_realized_pnl": 450.00,
+            "total_unrealized_pnl": 75.00,
+            "daily_pnl": 125.00,
+            "current_drawdown": -0.05,
+            "win_rate": 0.65
+          }
+          
+      - method: GET
+        path: /portfolio/pnl/history
+        description: Histórico de P&L
+        query_params:
+          period: enum [daily, weekly, monthly]
+          
+    risk:
+      - method: GET
+        path: /risk/status
+        description: Status de risco atual
+        response: |
+          {
+            "total_exposure": 2500.00,
+            "max_total_exposure": 5000.00,
+            "exposure_ratio": 0.50,
+            "current_drawdown": -0.05,
+            "max_drawdown": -0.20,
+            "daily_pnl": 125.00,
+            "max_daily_loss": -500.00,
+            "open_positions": 3,
+            "max_open_positions": 10,
+            "mode": "LIVE"
+          }
+          
+      - method: PUT
+        path: /risk/limits
+        description: Atualiza limites de risco
+        body: |
+          {
+            "max_exposure_per_asset": 1500.00,
+            "max_total_exposure": 7500.00,
+            "max_drawdown": -0.25
+          }
+          
+    strategies:
+      - method: GET
+        path: /strategies
+        description: Lista estratégias e status
+        
+      - method: POST
+        path: /strategies/{strategy_name}/enable
+        description: Habilita estratégia
+        body: |
+          {
+            "symbols": ["BTCUSDT", "ETHUSDT"]
+          }
+          
+      - method: POST
+        path: /strategies/{strategy_name}/disable
+        description: Desabilita estratégia
+        
+      - method: PUT
+        path: /strategies/{strategy_name}/params
+        description: Atualiza parâmetros de estratégia
+        body: |
+          {
+            "rsi_period": 14,
+            "oversold": 25
+          }
+          
+    system:
+      - method: GET
+        path: /system/health
+        description: Health check do sistema
+        response: |
+          {
+            "status": "healthy",
+            "mode": "LIVE",
+            "components": {
+              "kafka": "connected",
+              "redis": "connected",
+              "database": "connected",
+              "exchange": "connected"
+            }
+          }
+          
+      - method: POST
+        path: /system/mode
+        description: Muda modo de operação
+        body: |
+          {
+            "mode": "LIVE"
+          }
+          
+      - method: POST
+        path: /system/emergency-stop
+        description: Para todo o trading imediatamente
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 12. INSTRUÇÕES DE DESENVOLVIMENTO                            │
+# └─────────────────────────────────────────────────────────────┘
+
+development_instructions:
+  setup:
+    prerequisites:
+      - Rust 1.75+ (rustup)
+      - Docker & Docker Compose
+      - Postgres client (psql)
+      - Redis client (redis-cli)
+      - Kafka client (kafkacat/kcat)
+      - Binance account (API keys)
+      
+    steps:
+      - step: 1
+        action: Clone o repositório
+        command: git clone <repo-url> && cd crypto-management
+        
+      - step: 2
+        action: Copie o arquivo de configuração
+        command: cp .env.example .env
+        
+      - step: 3
+        action: Configure as variáveis de ambiente
+        details: |
+          Edite .env e configure:
+          - OPERATION_MODE=PAPER (começar com paper)
+          - EXCHANGE_API_KEY (Binance)
+          - EXCHANGE_API_SECRET (Binance)
+          - DATABASE_URL
+          - KAFKA_BROKERS
+          - REDIS_URL
+          - RISK_PROFILE=moderate
+          
+      - step: 4
+        action: Inicie dependências
+        command: docker-compose up -d kafka postgres redis
+        
+      - step: 5
+        action: Execute migrations
+        command: cargo run --bin migrate
+        
+      - step: 6
+        action: Instale dependências Rust
+        command: cargo build
+        
+      - step: 7
+        action: Execute o serviço
+        command: cargo run
+        
+  testing:
+    check_risk_validation:
+      description: Testar validação de risco
+      command: |
+        curl -X GET http://localhost:8080/api/risk/status
+        
+    simulate_manual_trade:
+      description: Simular trade manual (se auto-discovery habilitado)
+      action: |
+        Executar ordem manual no app da Binance
+        → Verificar logs do crypto-management
+        → Deve detectar e criar posição
+        
+    check_positions:
+      command: |
+        curl -X GET http://localhost:8080/api/positions
+        
+    enable_strategy:
+      command: |
+        curl -X POST http://localhost:8080/api/strategies/RSI_DIVERGENCE/enable \
+          -H "Content-Type: application/json" \
+          -d '{"symbols": ["BTCUSDT"]}'
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 13. TROUBLESHOOTING                                          │
+# └─────────────────────────────────────────────────────────────┘
+
+troubleshooting:
+  common_issues:
+    - issue: "Auto-discovery não detectando trades manuais"
+      causes:
+        - User data stream não conectado
+        - API keys sem permissão de user data
+        - WebSocket desconectado
+      solutions:
+        - Verificar logs: RUST_LOG=debug
+        - Testar API keys: cargo run --bin test-exchange-connection
+        - Verificar health: curl localhost:8080/api/system/health
+        
+    - issue: "Sinais sendo rejeitados constantemente"
+      causes:
+        - Limites de risco muito restritivos
+        - Drawdown atingido
+        - Loss diário atingido
+      solutions:
+        - Verificar risk status: curl localhost:8080/api/risk/status
+        - Ajustar limites: PUT /api/risk/limits
+        - Verificar métricas: signals_rejected_total
+        
+    - issue: "Posições não aparecendo"
+      causes:
+        - Ordem não executada
+        - Evento orders.events não recebido
+        - Erro ao processar evento
+      solutions:
+        - Verificar tópico Kafka: kcat -C -b localhost:9092 -t orders.events
+        - Verificar logs de processamento
+        - Verificar database: SELECT * FROM positions
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 14. ROADMAP & MELHORIAS FUTURAS                              │
+# └─────────────────────────────────────────────────────────────┘
+
+roadmap:
+  v1_0:
+    status: Current
+    features:
+      - ✅ Gerenciamento de posições
+      - ✅ Risk management central
+      - ✅ Auto-discovery
+      - ✅ Controle de estratégias
+      - ✅ Controle de modo
+      - ✅ APIs REST
+      
+  v1_1:
+    planned_features:
+      - Portfolio rebalancing automático
+      - Advanced risk metrics (VaR, CVaR)
+      - Multi-account support
+      - WebSocket API (real-time updates)
+      - Advanced analytics dashboard
+      
+  v2_0:
+    planned_features:
+      - Machine learning risk models
+      - Portfolio optimization
+      - Tax reporting
+      - Compliance tools
+      - Multi-exchange orchestration
+      - Social trading features
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 15. REFERÊNCIAS E DOCUMENTAÇÃO                               │
+# └─────────────────────────────────────────────────────────────┘
+
+references:
+  exchange_apis:
+    binance:
+      - name: Binance User Data Stream
+        url: https://binance-docs.github.io/apidocs/spot/en/#user-data-streams
+        
+  rust_libraries:
+    - name: binance-rs
+      url: https://docs.rs/binance
+      
+    - name: rust-decimal
+      url: https://docs.rs/rust_decimal
+      
+  risk_management:
+    - Position Sizing
+    - Drawdown Management
+    - Exposure Limits
+    - Kelly Criterion
+    - Value at Risk (VaR)
+    
+  architecture_patterns:
+    - Event-Driven Architecture
+    - Hexagonal Architecture (Ports & Adapters)
+    - Domain-Driven Design (DDD)
+    - CQRS (Command Query Responsibility Segregation)
+    - Orchestration Pattern
+
+
+# ════════════════════════════════════════════════════════════════
+# FIM DO PROJECT MAP
+# ════════════════════════════════════════════════════════════════

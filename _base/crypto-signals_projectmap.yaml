@@ -1,0 +1,1720 @@
+# ════════════════════════════════════════════════════════════════
+# CRYPTO-SIGNALS - PROJECT MAP
+# ════════════════════════════════════════════════════════════════
+# Sistema de análise técnica e geração de sinais de trading
+# Linguagem: Rust
+# Versão: 1.0.0
+# ════════════════════════════════════════════════════════════════
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 1. OVERVIEW DO PROJETO                                      │
+# └─────────────────────────────────────────────────────────────┘
+
+project:
+  name: crypto-signals
+  description: |
+    Serviço responsável por consumir preços em tempo real, aplicar estratégias
+    de análise técnica, gerar sinais de trading (compra/venda) e publicá-los
+    para consumo pelo crypto-trader.
+    
+    Características principais:
+    - Múltiplas estratégias de análise técnica (plugin-based)
+    - Suporte a múltiplos timeframes (1m, 5m, 15m, 1h, 4h, 1d)
+    - Indicadores técnicos (RSI, MACD, MA, Bollinger Bands, etc.)
+    - Gerenciamento de candles (OHLCV)
+    - Backtesting de estratégias
+    - Filtragem e combinação de sinais
+    - Cálculo de confidence baseado em múltiplos fatores
+    - Suporte a múltiplos symbols simultaneamente
+    - Hot-reload de estratégias
+    - Métricas e observabilidade completa
+
+  language: Rust
+  async_runtime: tokio
+  message_broker: Kafka (rdkafka)
+  technical_analysis: ta (rust-ta ou implementação própria)
+  
+  responsibilities:
+    - Consumir preços em tempo real do crypto-listener
+    - Construir e manter candles (OHLCV) por timeframe
+    - Aplicar estratégias de análise técnica
+    - Calcular indicadores técnicos
+    - Gerar sinais de compra/venda
+    - Filtrar sinais (confidence, confirmações)
+    - Publicar sinais no Kafka
+    - Manter histórico de sinais gerados
+    - Prover métricas de performance de estratégias
+    - Suportar backtesting
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 2. ARQUITETURA                                               │
+# └─────────────────────────────────────────────────────────────┘
+
+architecture:
+  pattern: Event-Driven + Hexagonal Architecture + Strategy Pattern + Plugin System
+  
+  components:
+    price_consumer:
+      description: Consome preços do Kafka (crypto-listener.prices)
+      technology: rdkafka
+      concurrency: Multi-threaded tokio tasks
+      
+    candle_builder:
+      description: Constrói candles OHLCV a partir de ticks
+      timeframes: [1m, 5m, 15m, 30m, 1h, 4h, 1d]
+      strategy: Time-based windowing
+      storage: In-memory + Postgres (historical)
+      
+    indicator_calculator:
+      description: Calcula indicadores técnicos
+      indicators:
+        - SMA (Simple Moving Average)
+        - EMA (Exponential Moving Average)
+        - RSI (Relative Strength Index)
+        - MACD (Moving Average Convergence Divergence)
+        - Bollinger Bands
+        - Stochastic
+        - ADX (Average Directional Index)
+        - ATR (Average True Range)
+      library: ta-rs ou implementação própria
+      caching: Redis (para performance)
+      
+    strategy_engine:
+      description: Executa estratégias de trading
+      pattern: Plugin-based (trait TradingStrategy)
+      strategies:
+        - RSI Divergence
+        - MACD Crossover
+        - MA Crossover (Golden/Death Cross)
+        - Bollinger Bands Breakout
+        - Support/Resistance
+        - Multi-Indicator Confluence
+      hot_reload: true
+      
+    signal_filter:
+      description: Filtra sinais baseado em regras
+      filters:
+        - Minimum confidence threshold
+        - Multiple strategy confirmation
+        - Timeframe alignment
+        - Volume validation
+        - Trend confirmation
+        
+    confidence_calculator:
+      description: Calcula confidence de sinais
+      factors:
+        - Strategy strength
+        - Multiple indicator agreement
+        - Timeframe confluence
+        - Volume profile
+        - Trend alignment
+      output: 0.0 a 1.0
+      
+    signal_publisher:
+      description: Publica sinais no Kafka
+      technology: rdkafka
+      topics: [signals.buy, signals.sell]
+      
+    backtester:
+      description: Testa estratégias com dados históricos
+      features:
+        - Historical candle replay
+        - Performance metrics (win rate, profit factor, etc.)
+        - Strategy parameter optimization
+        
+    metrics:
+      description: Coleta métricas
+      technology: Prometheus (rust-prometheus)
+      
+  data_flow: |
+    Kafka (prices) → Price Consumer → Candle Builder → Indicator Calculator →
+    Strategy Engine → Signal Filter → Confidence Calculator → Signal Publisher → Kafka (signals)
+                                ↓
+                         Strategy State Store
+                                ↓
+                            Metrics
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 3. TÓPICOS KAFKA                                             │
+# └─────────────────────────────────────────────────────────────┘
+
+kafka_topics:
+  consumed:
+    - name: crypto-listener.prices
+      description: Preços em tempo real
+      producer: crypto-listener
+      consumer_group: crypto-signals-group
+      
+      schema:
+        symbol: string
+        price: number
+        volume: number (quantity traded)
+        timestamp: ISO8601
+        
+      example_payload: |
+        {
+          "symbol": "BTCUSDT",
+          "price": 45123.50,
+          "volume": 0.5,
+          "timestamp": "2025-10-16T22:00:00Z"
+        }
+
+    - name: management.control.strategy
+      description: Comandos de controle de estratégias
+      producer: crypto-management
+      
+      schema:
+        action: enum [ENABLE, DISABLE, UPDATE_PARAMS]
+        strategy: string
+        symbols: array ou "ALL"
+        params: object (parâmetros da estratégia)
+
+  produced:
+    - name: signals.buy
+      description: Sinais de compra gerados por estratégias
+      consumers:
+        - crypto-trader
+        - crypto-management
+        
+      schema:
+        symbol:
+          type: string
+          description: Par de negociação
+          
+        strategy:
+          type: string
+          description: Nome da estratégia que gerou o sinal
+          examples: ["RSI_DIVERGENCE", "MACD_CROSSOVER", "MA_GOLDEN_CROSS"]
+          
+        source:
+          type: string
+          fixed: "internal"
+          description: Sempre "internal" para crypto-signals
+          
+        confidence:
+          type: number
+          description: Nível de confiança (0.0 a 1.0)
+          calculation: Baseado em múltiplos fatores
+          
+        target_price:
+          type: number
+          description: Preço atual/sugerido de entrada
+          
+        stop_loss:
+          type: number
+          optional: true
+          description: Stop loss calculado (baseado em ATR ou % fixo)
+          
+        take_profit:
+          type: number
+          optional: true
+          description: Take profit calculado (risk/reward ratio)
+          
+        quantity:
+          type: number
+          optional: true
+          description: Quantidade sugerida (raramente usado)
+          
+        metadata:
+          type: object
+          description: Metadados da estratégia
+          fields:
+            timeframe: Timeframe usado (ex: "15m")
+            indicators: Valores dos indicadores
+            candle_timestamp: Timestamp do candle que gerou sinal
+            signal_strength: Força do sinal (0-100)
+            confluences: Número de confirmações
+            volume_profile: Informações de volume
+          
+        timestamp:
+          type: string
+          format: ISO8601
+          description: Timestamp de geração do sinal
+          
+      example_payload: |
+        {
+          "symbol": "BTCUSDT",
+          "strategy": "RSI_DIVERGENCE",
+          "source": "internal",
+          "confidence": 0.85,
+          "target_price": 45123.50,
+          "stop_loss": 44000.00,
+          "take_profit": 47500.00,
+          "metadata": {
+            "timeframe": "15m",
+            "indicators": {
+              "rsi": 28.5,
+              "rsi_divergence": "bullish",
+              "macd_histogram": 12.5
+            },
+            "candle_timestamp": "2025-10-16T22:00:00Z",
+            "signal_strength": 85,
+            "confluences": 3,
+            "volume_profile": {
+              "volume_ma_ratio": 1.5,
+              "trend": "increasing"
+            }
+          },
+          "timestamp": "2025-10-16T22:00:15Z"
+        }
+
+    - name: signals.sell
+      description: Sinais de venda
+      schema: Similar ao signals.buy
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 4. MAPA DE PASTAS                                            │
+# └─────────────────────────────────────────────────────────────┘
+
+project_structure:
+  description: Estrutura completa do projeto com descrição de cada módulo
+  architecture_layers: |
+    Presentation → Application → Domain
+                       ↓
+                Infrastructure
+    
+    - Domain: não depende de ninguém (núcleo puro)
+    - Application: depende apenas de Domain
+    - Infrastructure: implementa contratos de Application
+    - Presentation: usa Application e injeta Infrastructure via DI
+    
+  structure: |
+    crypto-signals/
+    ├── src/
+    │   ├── main.rs                          # Entry point: bootstrap do app (config, consumer, strategies, publisher, HTTP server)
+    │   ├── lib.rs                           # Biblioteca pública expondo módulos principais
+    │   │
+    │   ├── domain/                          # ⭐ Camada de Domínio (regras de negócio puras, sem I/O)
+    │   │   ├── mod.rs
+    │   │   ├── errors.rs                    # Erros de domínio (StrategyError, IndicatorError)
+    │   │   ├── aggregates/                  # Agregados DDD
+    │   │   │   ├── mod.rs
+    │   │   │   ├── candle.rs                # CandleAggregate (constrói, valida OHLCV)
+    │   │   │   ├── signal.rs                # SignalAggregate (valida, calcula confidence)
+    │   │   │   ├── strategy.rs              # StrategyAggregate (executa, mantém estado)
+    │   │   │   └── market_state.rs          # MarketStateAggregate (gerencia estado do mercado)
+    │   │   ├── entities/                    # Entidades de domínio
+    │   │   │   ├── mod.rs
+    │   │   │   ├── candle.rs                # Entidade Candle (OHLCV)
+    │   │   │   ├── tick.rs                  # Entidade Tick (price update)
+    │   │   │   ├── signal.rs                # Entidade Signal
+    │   │   │   └── indicator.rs             # Entidade Indicator (valor calculado)
+    │   │   ├── events/                      # Domain events
+    │   │   │   ├── mod.rs
+    │   │   │   ├── candle_events.rs         # CandleCompleted, CandleUpdated
+    │   │   │   ├── signal_events.rs         # SignalGenerated, SignalFiltered
+    │   │   │   └── strategy_events.rs       # StrategyEnabled, StrategyDisabled, StrategyTriggered
+    │   │   ├── repositories/                # Traits de repositórios (contratos)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── candle_repository.rs     # Contrato para armazenar candles históricos
+    │   │   │   ├── signal_repository.rs     # Contrato para persistir sinais
+    │   │   │   └── strategy_repository.rs   # Contrato para configurações de estratégias
+    │   │   ├── services/                    # Serviços de domínio
+    │   │   │   ├── mod.rs
+    │   │   │   ├── candle_builder.rs        # Constrói candles a partir de ticks
+    │   │   │   ├── indicator_calculator.rs  # Calcula indicadores técnicos
+    │   │   │   ├── signal_validator.rs      # Valida sinais (regras de negócio)
+    │   │   │   ├── confidence_calculator.rs # Calcula confidence de sinais
+    │   │   │   └── trend_analyzer.rs        # Analisa tendência de mercado
+    │   │   └── value_objects/               # Value objects
+    │   │       ├── mod.rs
+    │   │       ├── symbol.rs                # VO Symbol
+    │   │       ├── timeframe.rs             # VO Timeframe (1m, 5m, 15m, etc.)
+    │   │       ├── price.rs                 # VO Price
+    │   │       ├── volume.rs                # VO Volume
+    │   │       ├── confidence.rs            # VO Confidence (0.0 a 1.0)
+    │   │       ├── signal_type.rs           # VO SignalType (BUY, SELL)
+    │   │       └── strategy_name.rs         # VO StrategyName
+    │   │
+    │   ├── application/                     # ⭐ Camada de Aplicação (casos de uso, orquestração)
+    │   │   ├── mod.rs
+    │   │   ├── dtos/                        # Data Transfer Objects
+    │   │   │   ├── mod.rs
+    │   │   │   ├── commands.rs              # Command DTOs (GenerateSignalCommand)
+    │   │   │   ├── candle_dto.rs            # DTO para candles
+    │   │   │   ├── signal_dto.rs            # DTO para sinais
+    │   │   │   ├── requests.rs              # HTTP request DTOs
+    │   │   │   └── responses.rs             # HTTP response DTOs
+    │   │   ├── ports/                       # ⚡ Ports (interfaces/contratos para adapters)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── price_consumer_port.rs   # Contrato para consumir preços (Kafka)
+    │   │   │   ├── signal_publisher_port.rs # Contrato para publicar sinais (Kafka)
+    │   │   │   ├── candle_store_port.rs     # Contrato para armazenar candles
+    │   │   │   ├── indicator_cache_port.rs  # Contrato para cache de indicadores (Redis)
+    │   │   │   └── market_data_port.rs      # Contrato para dados históricos
+    │   │   ├── strategies/                  # 🔌 Estratégias (plugins)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── strategy_trait.rs        # Trait TradingStrategy
+    │   │   │   ├── rsi_divergence.rs        # Estratégia: RSI Divergence
+    │   │   │   ├── macd_crossover.rs        # Estratégia: MACD Crossover
+    │   │   │   ├── ma_crossover.rs          # Estratégia: MA Crossover (Golden/Death Cross)
+    │   │   │   ├── bollinger_breakout.rs    # Estratégia: Bollinger Bands Breakout
+    │   │   │   ├── support_resistance.rs    # Estratégia: Support/Resistance
+    │   │   │   └── multi_indicator.rs       # Estratégia: Multi-Indicator Confluence
+    │   │   ├── filters/                     # Filtros de sinais
+    │   │   │   ├── mod.rs
+    │   │   │   ├── filter_trait.rs          # Trait SignalFilter
+    │   │   │   ├── confidence_filter.rs     # Filtra por confidence mínima
+    │   │   │   ├── volume_filter.rs         # Filtra por volume
+    │   │   │   ├── trend_filter.rs          # Filtra por alinhamento de tendência
+    │   │   │   └── timeframe_filter.rs      # Filtra por confluência de timeframes
+    │   │   ├── queries/                     # Queries (CQRS read-side)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── get_signal_history.rs    # Query: histórico de sinais
+    │   │   │   ├── get_strategy_stats.rs    # Query: estatísticas por estratégia
+    │   │   │   └── get_candles.rs           # Query: candles históricos
+    │   │   └── services/                    # Application services (orquestração de casos de uso)
+    │   │       ├── mod.rs
+    │   │       ├── signal_service.rs        # Caso de uso: gerar e publicar sinal
+    │   │       ├── strategy_service.rs      # Caso de uso: gerenciar estratégias
+    │   │       ├── candle_service.rs        # Caso de uso: gerenciar candles
+    │   │       └── analysis_orchestrator.rs # Orquestra: price → candle → indicators → strategies → signals
+    │   │
+    │   ├── infrastructure/                  # ⭐ Camada de Infraestrutura (implementações técnicas)
+    │   │   ├── mod.rs
+    │   │   ├── bootstrap/                   # Inicialização de componentes
+    │   │   │   ├── mod.rs
+    │   │   │   ├── database.rs              # Setup de conexão Postgres + migrations
+    │   │   │   ├── redis.rs                 # Setup de conexão Redis
+    │   │   │   ├── kafka_consumer.rs        # Inicializa consumer Kafka (prices)
+    │   │   │   ├── kafka_publisher.rs       # Inicializa publisher Kafka (signals)
+    │   │   │   └── strategies.rs            # Inicializa e registra estratégias
+    │   │   ├── config/                      # Configuração e settings
+    │   │   │   ├── mod.rs
+    │   │   │   ├── settings.rs              # Struct Settings + carregamento de env vars
+    │   │   │   └── strategy_config.rs       # Configurações de estratégias
+    │   │   ├── messaging/                   # Messaging
+    │   │   │   ├── mod.rs
+    │   │   │   ├── kafka_price_consumer.rs  # Consumer de preços
+    │   │   │   ├── kafka_signal_publisher.rs # Publisher de sinais
+    │   │   │   └── price_handler.rs         # Handler que processa preços recebidos
+    │   │   ├── candles/                     # Gerenciamento de candles
+    │   │   │   ├── mod.rs
+    │   │   │   ├── time_based_builder.rs    # Constrói candles baseado em tempo
+    │   │   │   └── candle_aggregator.rs     # Agrega múltiplos timeframes
+    │   │   ├── indicators/                  # Implementações de indicadores técnicos
+    │   │   │   ├── mod.rs
+    │   │   │   ├── sma.rs                   # Simple Moving Average
+    │   │   │   ├── ema.rs                   # Exponential Moving Average
+    │   │   │   ├── rsi.rs                   # Relative Strength Index
+    │   │   │   ├── macd.rs                  # MACD
+    │   │   │   ├── bollinger.rs             # Bollinger Bands
+    │   │   │   ├── stochastic.rs            # Stochastic Oscillator
+    │   │   │   ├── adx.rs                   # Average Directional Index
+    │   │   │   └── atr.rs                   # Average True Range
+    │   │   ├── persistence/                 # Persistência
+    │   │   │   ├── mod.rs
+    │   │   │   ├── postgres_candle_repository.rs    # Store de candles históricos
+    │   │   │   ├── postgres_signal_repository.rs    # Store de sinais
+    │   │   │   ├── postgres_strategy_repository.rs  # Store de configurações
+    │   │   │   └── redis_indicator_cache.rs         # Cache de indicadores
+    │   │   ├── backtesting/                 # Backtesting
+    │   │   │   ├── mod.rs
+    │   │   │   ├── backtest_engine.rs       # Engine de backtesting
+    │   │   │   ├── historical_replay.rs     # Replay de candles históricos
+    │   │   │   └── performance_calculator.rs # Calcula métricas de performance
+    │   │   ├── metrics/                     # Métricas e observabilidade
+    │   │   │   ├── mod.rs
+    │   │   │   └── prometheus_metrics.rs    # Registra métricas Prometheus
+    │   │   ├── shutdown/                    # Shutdown graceful
+    │   │   │   ├── mod.rs
+    │   │   │   ├── graceful.rs              # Coordena shutdown
+    │   │   │   └── signal_handler.rs        # Captura sinais SIGTERM/SIGINT
+    │   │   └── startup/                     # Startup do aplicativo
+    │   │       ├── mod.rs
+    │   │       ├── banner.rs                # Banner ASCII no console
+    │   │       ├── health.rs                # Health checks
+    │   │       └── logging.rs               # Setup de logs (tracing-subscriber)
+    │   │
+    │   ├── presentation/                    # ⭐ Camada de Apresentação (HTTP REST API)
+    │   │   ├── mod.rs
+    │   │   └── http/                        # HTTP REST API (Axum)
+    │   │       ├── mod.rs
+    │   │       ├── router.rs                # Definição de rotas (endpoints)
+    │   │       ├── responses.rs             # Helpers de resposta (ApiResponse, ErrorResponse)
+    │   │       ├── controllers/             # Controllers HTTP
+    │   │       │   ├── mod.rs
+    │   │       │   ├── signal_controller.rs # Endpoints de sinais (history, stats)
+    │   │       │   ├── strategy_controller.rs # Endpoints de estratégias (enable, disable, config)
+    │   │       │   ├── candle_controller.rs # Endpoints de candles (get, query)
+    │   │       │   ├── backtest_controller.rs # Endpoints de backtesting
+    │   │       │   └── health_controller.rs # Health checks, metrics
+    │   │       └── middleware/              # Middlewares HTTP
+    │   │           ├── mod.rs
+    │   │           └── request_logger.rs    # Log de requests HTTP
+    │   │
+    │   └── shared/                          # ⭐ Shared Kernel (código transversal)
+    │       ├── mod.rs
+    │       ├── errors.rs                    # Erros compartilhados (ApplicationError, InfrastructureError)
+    │       ├── types.rs                     # Tipos compartilhados (EventEnvelope, Timestamp, etc.)
+    │       ├── traits/                      # Traits comuns
+    │       │   ├── mod.rs
+    │       │   └── aggregate_root.rs        # Trait AggregateRoot
+    │       └── utils/                       # Utilitários
+    │           ├── mod.rs
+    │           ├── datetime.rs              # Helpers de data/hora
+    │           ├── math.rs                  # Helpers matemáticos (médias, etc.)
+    │           └── validation.rs            # Validações genéricas
+    │
+    ├── config/                              # 📁 Configurações externas
+    │   ├── development.yaml                 # Config para ambiente dev
+    │   ├── production.yaml                  # Config para ambiente prod
+    │   └── strategies/                      # Configurações de estratégias
+    │       ├── rsi_divergence.yaml          # Params: rsi_period, oversold, overbought
+    │       ├── macd_crossover.yaml          # Params: fast, slow, signal
+    │       ├── ma_crossover.yaml            # Params: fast_period, slow_period
+    │       └── bollinger_breakout.yaml      # Params: period, std_dev
+    │
+    ├── migrations/                          # 📊 Migrações de banco (Flyway)
+    │   ├── V001__initial_schema.sql         # Schema inicial (candles, signals, strategies)
+    │   ├── V002__indexes.sql                # Índices para performance
+    │   └── V003__backtesting_tables.sql     # Tabelas para backtesting
+    │
+    ├── data/                                # 📈 Dados históricos (para backtesting)
+    │   └── historical_candles/              # Candles históricos (CSV ou Parquet)
+    │       ├── BTCUSDT_1m.csv
+    │       ├── BTCUSDT_5m.csv
+    │       └── ETHUSDT_1h.csv
+    │
+    ├── docs/                                # 📚 Documentação técnica
+    │   ├── README.md                        # Índice de documentação
+    │   ├── ARCHITECTURE.md                  # Detalhes da arquitetura
+    │   ├── STRATEGIES.md                    # Documentação de estratégias
+    │   ├── INDICATORS.md                    # Documentação de indicadores
+    │   └── BACKTESTING.md                   # Guia de backtesting
+    │
+    ├── Cargo.toml                           # Configuração Rust (deps, features)
+    ├── Cargo.lock                           # Lock file de dependências
+    ├── Dockerfile                           # Build multi-stage production
+    ├── docker-compose.yml                   # Stack completa (app, Kafka, Postgres, Redis)
+    ├── Makefile                             # Comandos make (build, test, backtest, docker)
+    ├── crypto-signals_projectmap.yaml       # Este arquivo (documentação estruturada)
+    └── README.md                            # Documentação principal do projeto
+    
+  conventions:
+    domain_layer:
+      description: Camada de Domínio (domain/)
+      rules:
+        - ✅ Sem dependências de infraestrutura
+        - ✅ Lógica de negócio pura (cálculos, validações)
+        - ✅ Aggregates aplicam eventos e validam invariantes
+        - ✅ Value objects imutáveis com validação
+        - ✅ Services de domínio para lógica cross-aggregate
+        - ✅ Repositories como traits (contratos apenas)
+        - ✅ Cálculos de indicadores como services de domínio
+        
+    application_layer:
+      description: Camada de Aplicação (application/)
+      rules:
+        - ✅ Define Ports (interfaces) que infraestrutura implementa
+        - ✅ Orquestra casos de uso (price → candle → analysis → signal)
+        - ✅ DTOs para comunicação entre camadas
+        - ✅ Strategies como plugins (trait-based)
+        - ✅ Filters como plugins (trait-based)
+        - ✅ Queries para read-side (CQRS)
+        - ✅ Não conhece detalhes de implementação (Kafka, Redis, TA-Lib)
+        
+    infrastructure_layer:
+      description: Camada de Infraestrutura (infrastructure/)
+      rules:
+        - ✅ Implementa Adapters (Kafka, Postgres, Redis)
+        - ✅ Bootstrap e configuração
+        - ✅ Messaging (consumer/publisher)
+        - ✅ Persistence (candles, signals)
+        - ✅ Indicadores técnicos (implementação ou wrapper TA-Lib)
+        - ✅ Backtesting engine
+        - ✅ Shutdown graceful
+        - ✅ Startup e health checks
+        
+    presentation_layer:
+      description: Camada de Apresentação (presentation/)
+      rules:
+        - ✅ HTTP REST API (Axum)
+        - ✅ Controllers e routers
+        - ✅ Conversão DTOs <-> JSON
+        - ✅ Middlewares (logging)
+        - ✅ Não contém lógica de negócio
+        - ✅ Endpoints para consultas e controle
+        
+    shared_kernel:
+      description: Shared Kernel (shared/)
+      rules:
+        - ✅ Código compartilhado entre camadas
+        - ✅ Traits comuns (AggregateRoot)
+        - ✅ Tipos transversais (EventEnvelope)
+        - ✅ Utilitários (datetime, math, validação)
+        - ✅ Erros compartilhados
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 5. ESTRATÉGIAS DE TRADING                                    │
+# └─────────────────────────────────────────────────────────────┘
+
+trading_strategies:
+  trait_definition: |
+    pub trait TradingStrategy: Send + Sync {
+        fn name(&self) -> &str;
+        fn analyze(&self, candles: &[Candle], indicators: &IndicatorSet) 
+            -> Result<Option<Signal>>;
+        fn required_candles(&self) -> usize;
+        fn timeframes(&self) -> &[Timeframe];
+        fn default_params(&self) -> StrategyParams;
+    }
+  
+  strategies:
+    rsi_divergence:
+      name: RSI Divergence
+      description: |
+        Detecta divergências entre preço e RSI. Divergência bullish (preço faz
+        lower low mas RSI faz higher low) indica possível reversão de alta.
+      parameters:
+        rsi_period: 14
+        oversold: 30
+        overbought: 70
+        lookback_periods: 20
+      timeframes: [15m, 1h, 4h]
+      required_candles: 50
+      confidence_calculation: |
+        base = 0.7
+        + 0.1 se divergência clara (2+ swings)
+        + 0.1 se RSI em zona extrema (<25 ou >75)
+        + 0.05 se volume acima da média
+      signals:
+        - BUY quando divergência bullish + RSI < 30
+        - SELL quando divergência bearish + RSI > 70
+        
+    macd_crossover:
+      name: MACD Crossover
+      description: |
+        Crossover da linha MACD com a linha de sinal. Crossover acima
+        indica momentum bullish, abaixo indica bearish.
+      parameters:
+        fast_period: 12
+        slow_period: 26
+        signal_period: 9
+      timeframes: [15m, 1h, 4h]
+      required_candles: 35
+      confidence_calculation: |
+        base = 0.75
+        + 0.1 se histograma crescendo
+        + 0.1 se crossover acima/abaixo de zero
+        + 0.05 se alinhado com tendência (EMA200)
+      signals:
+        - BUY quando MACD cruza acima da signal line
+        - SELL quando MACD cruza abaixo da signal line
+        
+    ma_crossover:
+      name: MA Crossover (Golden/Death Cross)
+      description: |
+        Crossover de médias móveis. Golden Cross (MA rápida cruza acima da lenta)
+        indica tendência de alta. Death Cross (cruza abaixo) indica baixa.
+      parameters:
+        fast_period: 50
+        slow_period: 200
+        ma_type: SMA ou EMA
+      timeframes: [1h, 4h, 1d]
+      required_candles: 210
+      confidence_calculation: |
+        base = 0.8
+        + 0.1 se ambas MAs inclinadas na direção do sinal
+        + 0.05 se distância > 1% entre MAs
+        + 0.05 se volume confirmando
+      signals:
+        - BUY quando MA50 cruza acima MA200 (Golden Cross)
+        - SELL quando MA50 cruza abaixo MA200 (Death Cross)
+        
+    bollinger_breakout:
+      name: Bollinger Bands Breakout
+      description: |
+        Breakout das Bollinger Bands. Preço tocando banda inferior em oversold
+        pode indicar reversão. Breakout acima da banda superior indica força.
+      parameters:
+        period: 20
+        std_dev: 2.0
+        rsi_period: 14
+      timeframes: [15m, 1h]
+      required_candles: 30
+      confidence_calculation: |
+        base = 0.7
+        + 0.1 se RSI confirma (oversold/overbought)
+        + 0.1 se volume spike
+        + 0.05 se candle fecha fora da banda
+      signals:
+        - BUY quando preço toca banda inferior + RSI < 30
+        - SELL quando preço toca banda superior + RSI > 70
+        
+    support_resistance:
+      name: Support/Resistance Levels
+      description: |
+        Detecta níveis de suporte/resistência baseado em pivots históricos.
+        Bounce em suporte ou breakout de resistência gera sinais.
+      parameters:
+        lookback_periods: 50
+        touch_tolerance: 0.002  # 0.2%
+        min_touches: 2
+      timeframes: [1h, 4h]
+      required_candles: 60
+      confidence_calculation: |
+        base = 0.75
+        + 0.1 se nível testado 3+ vezes
+        + 0.1 se volume confirmando
+        + 0.05 se alinhado com tendência maior
+      signals:
+        - BUY em bounce de suporte forte
+        - SELL em rejeição de resistência forte
+        
+    multi_indicator:
+      name: Multi-Indicator Confluence
+      description: |
+        Combina múltiplos indicadores. Sinal apenas quando há confluência
+        (múltiplos indicadores concordam).
+      required_indicators:
+        - RSI
+        - MACD
+        - EMA (20, 50, 200)
+        - Volume
+      timeframes: [15m, 1h]
+      required_candles: 210
+      confluence_rules:
+        buy:
+          - RSI < 40 (oversold tendency)
+          - MACD bullish crossover
+          - Preço acima EMA20
+          - Volume acima média
+        sell:
+          - RSI > 60 (overbought tendency)
+          - MACD bearish crossover
+          - Preço abaixo EMA20
+          - Volume acima média
+      confidence_calculation: |
+        base = 0.6
+        + 0.1 por cada indicador adicional confirmando (max 4)
+        Exemplo: 3 indicadores = 0.6 + 0.3 = 0.9
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 6. INDICADORES TÉCNICOS                                      │
+# └─────────────────────────────────────────────────────────────┘
+
+technical_indicators:
+  implementation: Custom Rust ou ta-rs library
+  
+  indicators:
+    sma:
+      name: Simple Moving Average
+      description: Média aritmética simples dos N últimos preços
+      formula: SMA = (P1 + P2 + ... + Pn) / n
+      parameters:
+        period: número de candles
+      use_cases:
+        - Identificar tendência
+        - Suporte/resistência dinâmico
+        - Componente de outras estratégias
+        
+    ema:
+      name: Exponential Moving Average
+      description: Média que dá mais peso aos preços recentes
+      formula: EMA = Price * k + EMA(prev) * (1 - k), onde k = 2/(n+1)
+      parameters:
+        period: número de candles
+      use_cases:
+        - Reage mais rápido que SMA
+        - Usado em MACD
+        - Identificar tendência
+        
+    rsi:
+      name: Relative Strength Index
+      description: Oscilador que mede velocidade e magnitude de mudanças de preço
+      formula: RSI = 100 - (100 / (1 + RS)), onde RS = média de ganhos / média de perdas
+      parameters:
+        period: 14 (padrão)
+      output: 0 a 100
+      zones:
+        oversold: < 30
+        overbought: > 70
+      use_cases:
+        - Identificar condições de sobrecompra/sobrevenda
+        - Divergências com preço
+        - Confirmação de sinais
+        
+    macd:
+      name: Moving Average Convergence Divergence
+      description: Indicador de momentum baseado em divergência de EMAs
+      formula: |
+        MACD Line = EMA(12) - EMA(26)
+        Signal Line = EMA(9) of MACD Line
+        Histogram = MACD Line - Signal Line
+      parameters:
+        fast_period: 12
+        slow_period: 26
+        signal_period: 9
+      use_cases:
+        - Crossovers (MACD cruza signal)
+        - Divergências
+        - Histograma (momentum)
+        
+    bollinger_bands:
+      name: Bollinger Bands
+      description: Bandas de volatilidade ao redor de uma média móvel
+      formula: |
+        Middle Band = SMA(20)
+        Upper Band = Middle + (2 * StdDev)
+        Lower Band = Middle - (2 * StdDev)
+      parameters:
+        period: 20
+        std_dev: 2.0
+      use_cases:
+        - Identificar volatilidade
+        - Breakouts
+        - Reversões (toque nas bandas)
+        
+    stochastic:
+      name: Stochastic Oscillator
+      description: Compara preço de fechamento com range de preços
+      formula: |
+        %K = 100 * (Close - Low14) / (High14 - Low14)
+        %D = SMA(3) of %K
+      parameters:
+        k_period: 14
+        d_period: 3
+      output: 0 a 100
+      zones:
+        oversold: < 20
+        overbought: > 80
+      use_cases:
+        - Condições de sobrecompra/sobrevenda
+        - Crossovers de %K e %D
+        - Divergências
+        
+    adx:
+      name: Average Directional Index
+      description: Mede força da tendência (não direção)
+      formula: Baseado em +DI, -DI e smoothing
+      parameters:
+        period: 14
+      output: 0 a 100
+      interpretation:
+        0-25: tendência fraca ou ausente
+        25-50: tendência moderada
+        50-75: tendência forte
+        75-100: tendência muito forte
+      use_cases:
+        - Filtrar sinais (apenas em tendências fortes)
+        - Confirmar breakouts
+        
+    atr:
+      name: Average True Range
+      description: Mede volatilidade (não direção)
+      formula: |
+        True Range = max(High - Low, |High - Close(prev)|, |Low - Close(prev)|)
+        ATR = SMA(14) of True Range
+      parameters:
+        period: 14
+      use_cases:
+        - Calcular stop loss dinâmico (ex: 2 * ATR)
+        - Calcular take profit
+        - Position sizing
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 7. GERENCIAMENTO DE CANDLES                                  │
+# └─────────────────────────────────────────────────────────────┘
+
+candle_management:
+  concept: |
+    Candles (OHLCV) são construídos a partir de ticks (price updates) recebidos
+    do crypto-listener. Múltiplos timeframes são mantidos simultaneamente.
+    
+  candle_structure:
+    fields:
+      - symbol: string
+      - timeframe: enum (1m, 5m, 15m, 30m, 1h, 4h, 1d)
+      - open: first price in period
+      - high: highest price in period
+      - low: lowest price in period
+      - close: last price in period
+      - volume: sum of volumes in period
+      - open_time: timestamp do início do período
+      - close_time: timestamp do fim do período
+      - num_trades: número de trades (optional)
+      
+  timeframes:
+    supported:
+      - 1m: 1 minuto
+      - 5m: 5 minutos
+      - 15m: 15 minutos
+      - 30m: 30 minutos
+      - 1h: 1 hora
+      - 4h: 4 horas
+      - 1d: 1 dia
+    selection: Configurável por estratégia
+    
+  building_process:
+    strategy: Time-based windowing
+    steps:
+      - step: 1
+        action: Receber tick (price update)
+        
+      - step: 2
+        action: Determinar período(s) que o tick pertence
+        example: |
+          Tick às 10:03:45
+          → pertence ao candle 1m: 10:03:00-10:03:59
+          → pertence ao candle 5m: 10:00:00-10:04:59
+          → pertence ao candle 1h: 10:00:00-10:59:59
+          
+      - step: 3
+        action: Atualizar candle(s)
+        logic: |
+          Se primeiro tick do período: open = price
+          Atualiza: high = max(high, price)
+          Atualiza: low = min(low, price)
+          Sempre: close = price
+          Acumula: volume += tick.volume
+          
+      - step: 4
+        action: Ao completar período, emitir CandleCompleted event
+        
+    storage:
+      in_memory: Últimos N candles por timeframe (buffer circular)
+      postgres: Todos os candles históricos (para backtesting)
+      redis: Cache de indicadores calculados
+      
+  example_candle_buffer:
+    description: Mantém em memória para performance
+    structure: |
+      HashMap<(Symbol, Timeframe), VecDeque<Candle>>
+      
+      Exemplo:
+      {
+        ("BTCUSDT", Timeframe::M15): [candle1, candle2, ..., candle100],
+        ("BTCUSDT", Timeframe::H1): [candle1, candle2, ..., candle200],
+        ("ETHUSDT", Timeframe::M15): [candle1, candle2, ..., candle100],
+      }
+    buffer_size:
+      1m: 500 candles (~8 horas)
+      5m: 300 candles (~25 horas)
+      15m: 200 candles (~50 horas)
+      1h: 200 candles (~8 dias)
+      4h: 200 candles (~33 dias)
+      1d: 365 candles (~1 ano)
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 8. FLUXOS PRINCIPAIS                                         │
+# └─────────────────────────────────────────────────────────────┘
+
+flows:
+  price_to_signal:
+    description: Fluxo completo de preço até geração de sinal
+    steps:
+      - step: 1
+        component: Kafka Consumer
+        action: Consome price update do tópico crypto-listener.prices
+        
+      - step: 2
+        component: Price Handler
+        action: Deserializa payload e cria Tick entity
+        
+      - step: 3
+        component: Candle Builder
+        action: |
+          - Identifica timeframes afetados
+          - Atualiza candles em construção
+          - Se candle completo → emite CandleCompleted event
+          
+      - step: 4
+        component: Candle Store
+        action: |
+          - Persiste candle completo (Postgres)
+          - Atualiza buffer in-memory
+          
+      - step: 5
+        component: Indicator Calculator
+        action: |
+          - Verifica cache (Redis)
+          - Se não cached: calcula indicadores necessários
+          - Armazena no cache
+          
+      - step: 6
+        component: Strategy Engine
+        action: |
+          - Para cada estratégia ativa:
+            - Verifica se tem candles suficientes
+            - Executa analyze() com candles e indicators
+            - Se retorna sinal → prossegue
+          
+      - step: 7
+        component: Signal Validator
+        action: |
+          - Valida regras de negócio do sinal
+          - Verifica consistência (stop_loss < entry < take_profit para BUY)
+          
+      - step: 8
+        component: Signal Filters
+        action: |
+          - Aplica filtros configurados:
+            - Confidence mínima
+            - Volume mínimo
+            - Alinhamento de tendência
+            - Confluência de timeframes
+          - Se todos passam → prossegue
+          
+      - step: 9
+        component: Confidence Calculator
+        action: |
+          - Calcula confidence baseado em:
+            - Força da estratégia
+            - Confluência de indicadores
+            - Confluência de timeframes
+            - Volume profile
+          
+      - step: 10
+        component: Signal Enricher
+        action: |
+          - Adiciona metadata:
+            - Valores de indicadores
+            - Timeframe usado
+            - Signal strength
+            - Número de confluências
+          
+      - step: 11
+        component: Signal Publisher
+        action: |
+          - Publica SignalDTO em signals.buy ou signals.sell
+          - Serializa para JSON
+          
+      - step: 12
+        component: Signal Repository
+        action: Persiste sinal no banco (audit + analytics)
+        
+      - step: 13
+        component: Metrics
+        action: |
+          - signals_generated_total{strategy="RSI_DIVERGENCE"} +1
+          - Atualiza latência
+          
+    example_trace: |
+      [Consumer] Price: BTCUSDT @ 45123.50
+      [CandleBuilder] Updated 15m candle (O:45100 H:45150 L:45080 C:45123)
+      [CandleBuilder] 15m candle completed → event emitted
+      [IndicatorCalc] Calculated RSI(14) = 28.5, MACD = 12.5
+      [Strategy:RSI_DIVERGENCE] Detected bullish divergence
+      [SignalValidator] Signal valid
+      [Filters] Confidence: 0.85 ✓, Volume: 1.5x avg ✓, Trend: aligned ✓
+      [ConfidenceCalc] Final confidence: 0.85
+      [Enricher] Added metadata (timeframe=15m, confluences=3)
+      [Publisher] Published to signals.buy
+      [Repository] Signal persisted (id=uuid...)
+      [Metrics] signals_generated_total{strategy="RSI_DIVERGENCE",symbol="BTCUSDT"} +1
+
+  strategy_enable:
+    description: Habilitar estratégia via API ou Kafka
+    steps:
+      - step: 1
+        component: HTTP API ou Kafka
+        action: Recebe comando ENABLE_STRATEGY
+        
+      - step: 2
+        component: Strategy Service
+        action: |
+          - Valida estratégia existe
+          - Carrega configuração
+          - Registra estratégia ativa
+          
+      - step: 3
+        component: Strategy Repository
+        action: Persiste configuração
+        
+      - step: 4
+        component: Strategy Engine
+        action: Ativa estratégia para análise
+        
+      - step: 5
+        component: Metrics
+        action: strategies_active{strategy="MACD_CROSSOVER"} = 1
+
+  backtest:
+    description: Backtesting de estratégia
+    steps:
+      - step: 1
+        component: Backtest API
+        action: Recebe request com parâmetros
+        params:
+          - strategy: nome da estratégia
+          - symbol: par
+          - timeframe: timeframe
+          - start_date: início
+          - end_date: fim
+          - initial_capital: capital inicial
+          
+      - step: 2
+        component: Historical Data Loader
+        action: |
+          - Carrega candles históricos do Postgres ou CSV
+          - Filtra por symbol, timeframe, date range
+          
+      - step: 3
+        component: Backtest Engine
+        action: |
+          - Replay candles sequencialmente
+          - Para cada candle:
+            - Calcula indicadores
+            - Executa estratégia
+            - Se gerar sinal → simula trade
+            - Atualiza P&L
+          
+      - step: 4
+        component: Performance Calculator
+        action: |
+          - Calcula métricas:
+            - Total return
+            - Win rate
+            - Profit factor
+            - Max drawdown
+            - Sharpe ratio
+            - Número de trades
+          
+      - step: 5
+        component: Backtest API
+        action: Retorna resultado com métricas
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 9. CONFIGURAÇÃO                                              │
+# └─────────────────────────────────────────────────────────────┘
+
+configuration:
+  format: YAML + Environment Variables
+  precedence: ENV > config file > defaults
+  
+  files:
+    development: config/development.yaml
+    production: config/production.yaml
+    strategies: config/strategies/*.yaml
+    
+  structure:
+    kafka:
+      brokers:
+        env: KAFKA_BROKERS
+        default: "localhost:9092"
+      consumer_group:
+        env: KAFKA_CONSUMER_GROUP
+        default: "crypto-signals-group"
+      topics:
+        prices: "crypto-listener.prices"
+        signals_buy: "signals.buy"
+        signals_sell: "signals.sell"
+        
+    redis:
+      url:
+        env: REDIS_URL
+        default: "redis://localhost:6379"
+      indicator_cache_ttl_seconds:
+        env: REDIS_INDICATOR_TTL
+        default: 300  # 5 minutos
+        
+    database:
+      url:
+        env: DATABASE_URL
+        required: true
+      pool_size:
+        env: DATABASE_POOL_SIZE
+        default: 10
+        
+    candles:
+      buffer_size_1m:
+        env: CANDLE_BUFFER_1M
+        default: 500
+      buffer_size_5m: 300
+      buffer_size_15m: 200
+      buffer_size_1h: 200
+      buffer_size_4h: 200
+      buffer_size_1d: 365
+      persist_to_db:
+        env: CANDLES_PERSIST
+        default: true
+        
+    strategies:
+      rsi_divergence:
+        enabled:
+          env: STRATEGY_RSI_DIVERGENCE_ENABLED
+          default: true
+        symbols: ["BTCUSDT", "ETHUSDT"]
+        timeframes: ["15m", "1h"]
+        params:
+          rsi_period: 14
+          oversold: 30
+          overbought: 70
+          lookback_periods: 20
+          
+      macd_crossover:
+        enabled:
+          env: STRATEGY_MACD_ENABLED
+          default: true
+        symbols: ["BTCUSDT"]
+        timeframes: ["1h", "4h"]
+        params:
+          fast_period: 12
+          slow_period: 26
+          signal_period: 9
+          
+      ma_crossover:
+        enabled: false
+        symbols: ["BTCUSDT"]
+        timeframes: ["4h", "1d"]
+        params:
+          fast_period: 50
+          slow_period: 200
+          ma_type: "EMA"
+          
+    filters:
+      min_confidence:
+        env: FILTER_MIN_CONFIDENCE
+        default: 0.7
+      min_volume_ratio:
+        env: FILTER_MIN_VOLUME_RATIO
+        default: 1.0  # 1x average
+      require_trend_alignment:
+        env: FILTER_TREND_ALIGNMENT
+        default: false
+        
+    metrics:
+      enabled:
+        env: METRICS_ENABLED
+        default: true
+      port:
+        env: METRICS_PORT
+        default: 9090
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 10. MÉTRICAS E OBSERVABILIDADE                               │
+# └─────────────────────────────────────────────────────────────┘
+
+metrics:
+  prometheus_endpoint: /metrics
+  port: 9090
+  
+  counters:
+    - name: prices_received_total
+      help: Total de price updates recebidos
+      labels: [symbol]
+      
+    - name: candles_completed_total
+      help: Total de candles completados
+      labels: [symbol, timeframe]
+      
+    - name: signals_generated_total
+      help: Total de sinais gerados
+      labels: [symbol, strategy, side]
+      
+    - name: signals_filtered_total
+      help: Total de sinais filtrados (rejeitados)
+      labels: [symbol, strategy, filter_reason]
+      
+    - name: strategy_executions_total
+      help: Total de execuções de estratégia
+      labels: [strategy, symbol, timeframe]
+      
+    - name: indicator_calculations_total
+      help: Total de cálculos de indicadores
+      labels: [indicator]
+      
+  histograms:
+    - name: candle_build_duration_seconds
+      help: Duração da construção de candle
+      labels: [timeframe]
+      buckets: [0.001, 0.005, 0.01, 0.05, 0.1]
+      
+    - name: strategy_execution_duration_seconds
+      help: Duração da execução de estratégia
+      labels: [strategy]
+      buckets: [0.01, 0.05, 0.1, 0.5, 1.0, 2.0]
+      
+    - name: indicator_calculation_duration_seconds
+      help: Duração do cálculo de indicador
+      labels: [indicator]
+      buckets: [0.001, 0.005, 0.01, 0.05, 0.1]
+      
+    - name: signal_confidence
+      help: Distribuição de confidence dos sinais
+      labels: [strategy]
+      buckets: [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+      
+  gauges:
+    - name: active_strategies
+      help: Número de estratégias ativas
+      labels: [symbol]
+      
+    - name: candle_buffer_size
+      help: Tamanho do buffer de candles
+      labels: [symbol, timeframe]
+      
+    - name: indicator_cache_hit_rate
+      help: Taxa de hit do cache de indicadores
+      labels: []
+
+  logging:
+    format: JSON (structured logging)
+    level: INFO (configurável via env)
+    fields:
+      - timestamp
+      - level
+      - message
+      - symbol
+      - strategy
+      - timeframe
+      - signal_id
+      - duration_ms
+      - error (if any)
+
+  tracing:
+    enabled: true
+    library: tracing / tracing-subscriber
+    spans:
+      - name: process_price
+        fields: [symbol, price]
+      - name: build_candle
+        fields: [symbol, timeframe]
+      - name: execute_strategy
+        fields: [strategy, symbol, timeframe]
+      - name: generate_signal
+        fields: [signal_id, strategy, confidence]
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 11. BACKTESTING                                              │
+# └─────────────────────────────────────────────────────────────┘
+
+backtesting:
+  description: |
+    Sistema de backtesting para testar estratégias com dados históricos
+    antes de usar em produção.
+    
+  features:
+    - Historical candle replay
+    - Strategy parameter optimization
+    - Performance metrics calculation
+    - Visualization of results
+    - Export to CSV/JSON
+    
+  workflow:
+    - step: 1
+      title: Preparar dados históricos
+      action: |
+        - Download candles históricos (Binance API ou CSV)
+        - Armazenar em data/historical_candles/
+        - Ou usar candles já armazenados no Postgres
+        
+    - step: 2
+      title: Configurar backtest
+      params:
+        - strategy: "RSI_DIVERGENCE"
+        - symbol: "BTCUSDT"
+        - timeframe: "15m"
+        - start_date: "2024-01-01"
+        - end_date: "2024-12-31"
+        - initial_capital: 10000.0
+        - commission: 0.001  # 0.1%
+        - strategy_params: {rsi_period: 14, oversold: 30}
+        
+    - step: 3
+      title: Executar backtest
+      command: |
+        cargo run --bin backtest -- \
+          --strategy RSI_DIVERGENCE \
+          --symbol BTCUSDT \
+          --timeframe 15m \
+          --start 2024-01-01 \
+          --end 2024-12-31
+          
+    - step: 4
+      title: Analisar resultados
+      metrics:
+        - Total Return: % ou valor absoluto
+        - Win Rate: % de trades vencedores
+        - Profit Factor: Lucro bruto / Perda bruta
+        - Max Drawdown: Máxima queda do pico
+        - Sharpe Ratio: Retorno ajustado pelo risco
+        - Total Trades: Número de trades
+        - Average Win: Média dos trades vencedores
+        - Average Loss: Média dos trades perdedores
+        - Largest Win: Maior trade vencedor
+        - Largest Loss: Maior trade perdedor
+        
+  example_output: |
+    Backtest Results - RSI_DIVERGENCE (BTCUSDT 15m)
+    ════════════════════════════════════════════════
+    Period: 2024-01-01 to 2024-12-31
+    Initial Capital: $10,000.00
+    Final Capital: $12,450.00
+    
+    Performance Metrics:
+    ────────────────────
+    Total Return: +24.50%
+    Win Rate: 62.5%
+    Profit Factor: 1.85
+    Max Drawdown: -8.2%
+    Sharpe Ratio: 1.45
+    
+    Trade Statistics:
+    ─────────────────
+    Total Trades: 48
+    Winning Trades: 30
+    Losing Trades: 18
+    Average Win: $125.00
+    Average Loss: -$68.00
+    Largest Win: $450.00
+    Largest Loss: -$215.00
+    
+    Monthly Returns:
+    ────────────────
+    Jan: +3.2%  Feb: -1.5%  Mar: +5.1%  Apr: +2.8%
+    May: +1.9%  Jun: +3.5%  Jul: -2.1%  Aug: +4.2%
+    Sep: +2.5%  Oct: +1.8%  Nov: +3.9%  Dec: -0.8%
+    
+  parameter_optimization:
+    description: Teste múltiplas combinações de parâmetros
+    example: |
+      Otimizar RSI_DIVERGENCE:
+      - rsi_period: [10, 12, 14, 16, 18]
+      - oversold: [25, 30, 35]
+      - overbought: [65, 70, 75]
+      
+      Total combinations: 5 * 3 * 3 = 45 backtests
+      
+      Result: Melhor combinação
+      - rsi_period: 14
+      - oversold: 30
+      - overbought: 70
+      - Return: +28.5%
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 12. INSTRUÇÕES DE DESENVOLVIMENTO                            │
+# └─────────────────────────────────────────────────────────────┘
+
+development_instructions:
+  setup:
+    prerequisites:
+      - Rust 1.75+ (rustup)
+      - Docker & Docker Compose
+      - Postgres client (psql)
+      - Redis client (redis-cli)
+      - Kafka client (kafkacat/kcat)
+      
+    steps:
+      - step: 1
+        action: Clone o repositório
+        command: git clone <repo-url> && cd crypto-signals
+        
+      - step: 2
+        action: Copie o arquivo de configuração
+        command: cp .env.example .env
+        
+      - step: 3
+        action: Configure as variáveis de ambiente
+        details: |
+          Edite .env e configure:
+          - DATABASE_URL
+          - KAFKA_BROKERS
+          - REDIS_URL
+          
+      - step: 4
+        action: Inicie dependências
+        command: docker-compose up -d kafka postgres redis
+        
+      - step: 5
+        action: Execute migrations
+        command: cargo run --bin migrate
+        
+      - step: 6
+        action: (Opcional) Baixe dados históricos
+        command: cargo run --bin download-historical -- --symbol BTCUSDT --timeframe 15m
+        
+      - step: 7
+        action: Instale dependências Rust
+        command: cargo build
+        
+      - step: 8
+        action: Execute o serviço
+        command: cargo run
+        
+  testing_strategies:
+    backtest:
+      command: |
+        cargo run --bin backtest -- \
+          --strategy RSI_DIVERGENCE \
+          --symbol BTCUSDT \
+          --timeframe 15m \
+          --start 2024-01-01 \
+          --end 2024-12-31
+          
+    simulate_prices:
+      description: Publicar preços fictícios para testar
+      command: |
+        # Script Python simples
+        for i in $(seq 1 100); do
+          echo '{"symbol":"BTCUSDT","price":'$((45000 + RANDOM % 1000))',"volume":0.5,"timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' | \
+          kcat -P -b localhost:9092 -t crypto-listener.prices
+          sleep 1
+        done
+        
+  debugging:
+    logs:
+      command: RUST_LOG=debug cargo run
+      
+    check_candles:
+      command: |
+        psql $DATABASE_URL -c "SELECT * FROM candles WHERE symbol='BTCUSDT' AND timeframe='15m' ORDER BY open_time DESC LIMIT 10;"
+        
+    check_signals:
+      command: |
+        psql $DATABASE_URL -c "SELECT * FROM signals ORDER BY created_at DESC LIMIT 10;"
+        
+    monitor_indicators_cache:
+      command: |
+        redis-cli KEYS "indicator:*"
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 13. ADICIONANDO NOVA ESTRATÉGIA                              │
+# └─────────────────────────────────────────────────────────────┘
+
+adding_new_strategy:
+  description: Guia passo a passo para adicionar nova estratégia
+  
+  steps:
+    - step: 1
+      title: Criar arquivo da estratégia
+      action: Criar src/application/strategies/minha_estrategia.rs
+      template: |
+        use crate::application::strategies::strategy_trait::TradingStrategy;
+        use crate::domain::entities::{Candle, Signal};
+        use crate::domain::value_objects::{Timeframe, SignalType};
+        
+        pub struct MinhaEstrategia {
+            params: MinhaEstrategiaParams,
+        }
+        
+        pub struct MinhaEstrategiaParams {
+            pub param1: usize,
+            pub param2: f64,
+        }
+        
+        impl TradingStrategy for MinhaEstrategia {
+            fn name(&self) -> &str {
+                "MINHA_ESTRATEGIA"
+            }
+            
+            fn analyze(&self, candles: &[Candle], indicators: &IndicatorSet) 
+                -> Result<Option<Signal>> 
+            {
+                // Implementar lógica aqui
+                // Exemplo: se RSI < 30, retorna sinal BUY
+                
+                if let Some(rsi) = indicators.get("RSI") {
+                    if rsi.value < 30.0 {
+                        return Ok(Some(Signal::buy(
+                            candles.last().unwrap().close,
+                            self.name(),
+                            0.75,  // confidence
+                        )));
+                    }
+                }
+                
+                Ok(None)
+            }
+            
+            fn required_candles(&self) -> usize {
+                50
+            }
+            
+            fn timeframes(&self) -> &[Timeframe] {
+                &[Timeframe::M15, Timeframe::H1]
+            }
+            
+            fn default_params(&self) -> StrategyParams {
+                StrategyParams {
+                    param1: 14,
+                    param2: 2.0,
+                }
+            }
+        }
+        
+    - step: 2
+      title: Criar configuração
+      action: Criar config/strategies/minha_estrategia.yaml
+      content: |
+        enabled: true
+        symbols: ["BTCUSDT", "ETHUSDT"]
+        timeframes: ["15m", "1h"]
+        params:
+          param1: 14
+          param2: 2.0
+          
+    - step: 3
+      title: Registrar estratégia
+      action: Editar src/infrastructure/bootstrap/strategies.rs
+      code: |
+        pub fn register_strategies() -> HashMap<String, Box<dyn TradingStrategy>> {
+            let mut strategies = HashMap::new();
+            
+            strategies.insert(
+                "RSI_DIVERGENCE".to_string(),
+                Box::new(RsiDivergence::new()),
+            );
+            
+            // Adicionar sua estratégia
+            strategies.insert(
+                "MINHA_ESTRATEGIA".to_string(),
+                Box::new(MinhaEstrategia::new()),
+            );
+            
+            strategies
+        }
+        
+    - step: 4
+      title: Testar com backtest
+      command: |
+        cargo run --bin backtest -- \
+          --strategy MINHA_ESTRATEGIA \
+          --symbol BTCUSDT \
+          --timeframe 15m \
+          --start 2024-01-01 \
+          --end 2024-12-31
+          
+    - step: 5
+      title: Habilitar em produção
+      action: |
+        Via API:
+        curl -X POST http://localhost:8080/api/strategies/MINHA_ESTRATEGIA/enable
+        
+        Ou editar config/strategies/minha_estrategia.yaml:
+        enabled: true
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 14. TROUBLESHOOTING                                          │
+# └─────────────────────────────────────────────────────────────┘
+
+troubleshooting:
+  common_issues:
+    - issue: "Sinais não sendo gerados"
+      causes:
+        - Estratégias não habilitadas
+        - Candles insuficientes no buffer
+        - Filtros muito restritivos
+        - Indicadores não calculados
+      solutions:
+        - Verificar estratégias ativas: curl localhost:8080/api/strategies
+        - Verificar buffer: SELECT COUNT(*) FROM candles
+        - Ajustar filtros (min_confidence, etc)
+        - Verificar logs de cálculo de indicadores
+        
+    - issue: "Latência alta (price → signal)"
+      causes:
+        - Cálculo de indicadores lento
+        - Cache não funcionando
+        - Muitas estratégias ativas
+      solutions:
+        - Verificar métricas: indicator_calculation_duration_seconds
+        - Verificar Redis cache hit rate
+        - Desabilitar estratégias não essenciais
+        - Otimizar cálculos (usar ta-rs library)
+        
+    - issue: "Candles não sendo construídos"
+      causes:
+        - crypto-listener não publicando preços
+        - Consumer Kafka desconectado
+        - Erro no candle builder
+      solutions:
+        - Verificar tópico: kcat -C -b localhost:9092 -t crypto-listener.prices
+        - Verificar logs do consumer
+        - Verificar métricas: prices_received_total
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 15. ROADMAP & MELHORIAS FUTURAS                              │
+# └─────────────────────────────────────────────────────────────┘
+
+roadmap:
+  v1_0:
+    status: Current
+    features:
+      - ✅ Múltiplas estratégias (RSI, MACD, MA Crossover, etc.)
+      - ✅ Indicadores técnicos
+      - ✅ Gerenciamento de candles
+      - ✅ Filtragem de sinais
+      - ✅ Backtesting básico
+      
+  v1_1:
+    planned_features:
+      - Machine learning-based strategies
+      - Advanced backtesting (walk-forward, Monte Carlo)
+      - Strategy optimization (genetic algorithms)
+      - Multi-timeframe analysis
+      - Pattern recognition (head and shoulders, triangles, etc.)
+      
+  v2_0:
+    planned_features:
+      - AI-powered signal generation
+      - Sentiment analysis integration
+      - Order book analysis
+      - Market regime detection
+      - Portfolio optimization
+      - Real-time strategy parameter adjustment
+      
+  future_considerations:
+    - Options strategies
+    - Arbitrage detection
+    - Market making strategies
+    - News sentiment integration
+    - Social media sentiment
+    - On-chain metrics (for crypto)
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 16. REFERÊNCIAS E DOCUMENTAÇÃO                               │
+# └─────────────────────────────────────────────────────────────┘
+
+references:
+  technical_analysis:
+    - name: Technical Analysis Library (ta-rs)
+      url: https://docs.rs/ta
+      
+    - name: Investopedia - Technical Indicators
+      url: https://www.investopedia.com/terms/t/technicalindicator.asp
+      
+  trading_concepts:
+    - RSI (Relative Strength Index)
+    - MACD (Moving Average Convergence Divergence)
+    - Bollinger Bands
+    - Moving Averages (SMA, EMA)
+    - Support and Resistance
+    - Candlestick Patterns
+    
+  rust_libraries:
+    - name: ta-rs
+      url: https://docs.rs/ta
+      description: Technical analysis library
+      
+    - name: ndarray
+      url: https://docs.rs/ndarray
+      description: N-dimensional arrays (para cálculos)
+      
+  architecture_patterns:
+    - Event-Driven Architecture
+    - Hexagonal Architecture (Ports & Adapters)
+    - Strategy Pattern
+    - Domain-Driven Design (DDD)
+    - CQRS (Command Query Responsibility Segregation)
+
+
+# ════════════════════════════════════════════════════════════════
+# FIM DO PROJECT MAP
+# ════════════════════════════════════════════════════════════════

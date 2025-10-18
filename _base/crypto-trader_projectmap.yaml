@@ -1,0 +1,1476 @@
+# ════════════════════════════════════════════════════════════════
+# CRYPTO-TRADER - PROJECT MAP
+# ════════════════════════════════════════════════════════════════
+# Sistema de execução de ordens e gerenciamento de stops para trading
+# Linguagem: Rust
+# Versão: 1.0.0
+# ════════════════════════════════════════════════════════════════
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 1. OVERVIEW DO PROJETO                                      │
+# └─────────────────────────────────────────────────────────────┘
+
+project:
+  name: crypto-trader
+  description: |
+    Serviço responsável por executar ordens de trading baseado em sinais 
+    recebidos, gerenciar stops (stop loss, take profit) e trailing stops,
+    além de validar todas as operações contra regras de risco.
+    
+    Características principais:
+    - Execução automática de ordens baseada em sinais
+    - Validação de risco antes de cada execução
+    - Gerenciamento de stops (stop loss, take profit)
+    - Trailing stops dinâmicos
+    - Suporte a múltiplas exchanges (Binance inicialmente)
+    - Retry automático em caso de falha temporária
+    - Idempotência de ordens
+    - Auditoria completa de todas as operações
+    - Métricas e observabilidade
+
+  language: Rust
+  async_runtime: tokio
+  message_broker: Kafka (rdkafka)
+  exchanges: Binance (binance-rs ou binance-connector)
+  
+  responsibilities:
+    - Consumir sinais de trading dos tópicos Kafka
+    - Validar sinais contra regras de risco
+    - Executar ordens na exchange
+    - Gerenciar stops (stop loss, take profit)
+    - Gerenciar trailing stops
+    - Monitorar ordens até conclusão
+    - Publicar eventos de ordens (created, filled, cancelled)
+    - Manter histórico de ordens e execuções
+    - Prover métricas de execução
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 2. ARQUITETURA                                               │
+# └─────────────────────────────────────────────────────────────┘
+
+architecture:
+  pattern: Event-Driven + Hexagonal Architecture + DDD
+  
+  components:
+    signal_consumer:
+      description: Consome sinais de trading do Kafka
+      technology: rdkafka (librdkafka wrapper)
+      topics: [signals.buy, signals.sell]
+      
+    order_validator:
+      description: Valida ordens contra regras de negócio
+      validations:
+        - Duplicação (idempotência)
+        - Saldo disponível
+        - Limites de posição
+        - Limites de exposição
+        - Quantidade mínima/máxima
+        
+    risk_validator:
+      description: Valida contra regras de risk management
+      validations:
+        - Máximo drawdown
+        - Máxima exposição por asset
+        - Máxima exposição total
+        - Loss diário
+        
+    order_executor:
+      description: Executa ordens na exchange
+      features:
+        - Retry com exponential backoff
+        - Timeout configurável
+        - Validação de resposta
+        - Tratamento de erros específicos
+        
+    stop_manager:
+      description: Gerencia stops (stop loss, take profit)
+      features:
+        - Monitoramento de preços em tempo real
+        - Trigger automático
+        - Cancelamento de ordens relacionadas
+        - Notificação de acionamento
+        
+    trailing_stop_manager:
+      description: Gerencia trailing stops
+      features:
+        - Ajuste dinâmico do stop baseado em preço
+        - Configuração por percentual ou valor fixo
+        - Lock de lucro progressivo
+        
+    order_monitor:
+      description: Monitora status de ordens até conclusão
+      features:
+        - Polling de status
+        - User data stream (websocket)
+        - Timeout de execução
+        - Cancelamento automático
+        
+    event_publisher:
+      description: Publica eventos de ordens
+      technology: rdkafka
+      topic: orders.events
+      
+    metrics:
+      description: Coleta métricas
+      technology: Prometheus (rust-prometheus)
+      
+  data_flow: |
+    Kafka (signals) → Signal Consumer → Validators → Order Executor → Exchange
+                                           ↓
+                                    Event Publisher → Kafka (orders.events)
+                                           ↓
+                                    Stop Manager (monitora)
+                                           ↓
+                                    Trailing Stop Manager (ajusta)
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 3. TÓPICOS KAFKA                                             │
+# └─────────────────────────────────────────────────────────────┘
+
+kafka_topics:
+  consumed:
+    - name: signals.buy
+      description: Sinais de compra gerados por crypto-signals ou crypto-webhook
+      producers:
+        - crypto-signals
+        - crypto-webhook
+      consumer_group: crypto-trader-group
+      
+      schema:
+        symbol:
+          type: string
+          description: Par de negociação (ex: BTCUSDT)
+          
+        strategy:
+          type: string
+          description: Nome da estratégia que gerou o sinal
+          
+        source:
+          type: string
+          enum: [internal, tradingview, external]
+          description: Origem do sinal
+          
+        confidence:
+          type: number
+          description: Nível de confiança do sinal (0.0 a 1.0)
+          
+        target_price:
+          type: number
+          description: Preço alvo de entrada
+          
+        stop_loss:
+          type: number
+          optional: true
+          description: Preço de stop loss sugerido
+          
+        take_profit:
+          type: number
+          optional: true
+          description: Preço de take profit sugerido
+          
+        quantity:
+          type: number
+          optional: true
+          description: Quantidade sugerida (se não informado, calcula baseado em risco)
+          
+        metadata:
+          type: object
+          optional: true
+          description: Metadados adicionais da estratégia
+          
+        timestamp:
+          type: string
+          format: ISO8601
+          
+      example_payload: |
+        {
+          "symbol": "BTCUSDT",
+          "strategy": "RSI_DIVERGENCE",
+          "source": "internal",
+          "confidence": 0.85,
+          "target_price": 45000.00,
+          "stop_loss": 44000.00,
+          "take_profit": 47000.00,
+          "timestamp": "2025-10-16T22:00:00Z"
+        }
+
+    - name: signals.sell
+      description: Sinais de venda
+      schema: Similar ao signals.buy
+      
+    - name: management.control.risk
+      description: Atualizações de parâmetros de risco do crypto-management
+      schema:
+        action: enum [UPDATE_LIMITS, HALT_TRADING, RESUME_TRADING]
+        max_exposure_per_asset: number
+        max_total_exposure: number
+        max_daily_loss: number
+        
+    - name: management.control.mode
+      description: Mudanças de modo de operação
+      schema:
+        mode: enum [PAPER, LIVE, DRY_RUN]
+
+  produced:
+    - name: orders.events
+      description: Eventos de ordens executadas
+      
+      schema:
+        event_type:
+          type: string
+          enum: [CREATED, FILLED, PARTIAL_FILL, CANCELLED, REJECTED, EXPIRED, STOP_TRIGGERED]
+          
+        order_id:
+          type: string
+          description: ID da ordem na exchange
+          
+        client_order_id:
+          type: string
+          description: ID interno da ordem (para idempotência)
+          
+        symbol:
+          type: string
+          
+        side:
+          type: string
+          enum: [BUY, SELL]
+          
+        order_type:
+          type: string
+          enum: [MARKET, LIMIT, STOP_LOSS, STOP_LOSS_LIMIT, TAKE_PROFIT, TAKE_PROFIT_LIMIT]
+          
+        quantity:
+          type: number
+          description: Quantidade da ordem
+          
+        price:
+          type: number
+          optional: true
+          description: Preço da ordem (se LIMIT)
+          
+        stop_price:
+          type: number
+          optional: true
+          description: Preço de stop (se STOP_LOSS ou TAKE_PROFIT)
+          
+        filled_quantity:
+          type: number
+          optional: true
+          description: Quantidade já executada (para PARTIAL_FILL)
+          
+        average_price:
+          type: number
+          optional: true
+          description: Preço médio de execução (para FILLED/PARTIAL_FILL)
+          
+        commission:
+          type: number
+          optional: true
+          description: Comissão paga
+          
+        commission_asset:
+          type: string
+          optional: true
+          
+        status:
+          type: string
+          enum: [NEW, PARTIALLY_FILLED, FILLED, CANCELED, REJECTED, EXPIRED]
+          
+        error:
+          type: string
+          optional: true
+          description: Mensagem de erro (se REJECTED)
+          
+        signal_reference:
+          type: object
+          optional: true
+          description: Referência ao sinal original
+          
+        timestamp:
+          type: string
+          format: ISO8601
+          
+      example_payload: |
+        {
+          "event_type": "FILLED",
+          "order_id": "12345678",
+          "client_order_id": "crypto-trader-uuid-123",
+          "symbol": "BTCUSDT",
+          "side": "BUY",
+          "order_type": "MARKET",
+          "quantity": 0.01,
+          "filled_quantity": 0.01,
+          "average_price": 45023.50,
+          "commission": 0.00001,
+          "commission_asset": "BTC",
+          "status": "FILLED",
+          "signal_reference": {
+            "strategy": "RSI_DIVERGENCE",
+            "source": "internal"
+          },
+          "timestamp": "2025-10-16T22:00:15Z"
+        }
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 4. MAPA DE PASTAS                                            │
+# └─────────────────────────────────────────────────────────────┘
+
+project_structure:
+  description: Estrutura completa do projeto com descrição de cada módulo
+  architecture_layers: |
+    Presentation → Application → Domain
+                       ↓
+                Infrastructure
+    
+    - Domain: não depende de ninguém (núcleo puro)
+    - Application: depende apenas de Domain
+    - Infrastructure: implementa contratos de Application
+    - Presentation: usa Application e injeta Infrastructure via DI
+    
+  structure: |
+    crypto-trader/
+    ├── src/
+    │   ├── main.rs                          # Entry point: bootstrap do app (config, DB, consumers, executor, HTTP server)
+    │   ├── lib.rs                           # Biblioteca pública expondo módulos principais
+    │   │
+    │   ├── domain/                          # ⭐ Camada de Domínio (regras de negócio puras, sem I/O)
+    │   │   ├── mod.rs
+    │   │   ├── errors.rs                    # Erros de domínio (OrderValidationError, RiskViolationError)
+    │   │   ├── aggregates/                  # Agregados DDD
+    │   │   │   ├── mod.rs
+    │   │   │   ├── order.rs                 # OrderAggregate (valida, calcula, aplica eventos)
+    │   │   │   ├── position.rs              # PositionAggregate (gerencia posição aberta)
+    │   │   │   ├── stop_loss.rs             # StopLossAggregate (monitora, dispara)
+    │   │   │   └── trailing_stop.rs         # TrailingStopAggregate (ajusta dinamicamente)
+    │   │   ├── entities/                    # Entidades de domínio
+    │   │   │   ├── mod.rs
+    │   │   │   ├── order.rs                 # Entidade Order
+    │   │   │   ├── execution.rs             # Entidade Execution (fill parcial/total)
+    │   │   │   └── stop.rs                  # Entidade Stop (stop loss ou take profit)
+    │   │   ├── events/                      # Domain events
+    │   │   │   ├── mod.rs
+    │   │   │   ├── order_events.rs          # OrderCreated, OrderFilled, OrderCancelled, OrderRejected
+    │   │   │   ├── position_events.rs       # PositionOpened, PositionClosed, PositionUpdated
+    │   │   │   └── stop_events.rs           # StopLossSet, StopLossTriggered, TrailingStopAdjusted
+    │   │   ├── repositories/                # Traits de repositórios (contratos)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── order_repository.rs      # Contrato para persistir ordens
+    │   │   │   ├── position_repository.rs   # Contrato para persistir posições
+    │   │   │   └── execution_repository.rs  # Contrato para histórico de execuções
+    │   │   ├── services/                    # Serviços de domínio (lógica que não pertence a um agregado)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── order_validator.rs       # Valida ordem (duplicação, quantidade, limites)
+    │   │   │   ├── risk_validator.rs        # Valida contra regras de risco
+    │   │   │   ├── position_calculator.rs   # Calcula tamanho de posição baseado em risco
+    │   │   │   ├── pnl_calculator.rs        # Calcula P&L de posição
+    │   │   │   └── commission_calculator.rs # Calcula comissões
+    │   │   └── value_objects/               # Value objects
+    │   │       ├── mod.rs
+    │   │       ├── order_id.rs              # VO OrderId (exchange + client order id)
+    │   │       ├── symbol.rs                # VO Symbol (BTCUSDT, etc.)
+    │   │       ├── price.rs                 # VO Price (validação, comparação)
+    │   │       ├── quantity.rs              # VO Quantity (validação)
+    │   │       ├── order_side.rs            # VO OrderSide (BUY, SELL)
+    │   │       ├── order_type.rs            # VO OrderType (MARKET, LIMIT, STOP_LOSS, etc.)
+    │   │       ├── order_status.rs          # VO OrderStatus (NEW, FILLED, etc.)
+    │   │       ├── stop_type.rs             # VO StopType (STOP_LOSS, TAKE_PROFIT)
+    │   │       └── time_in_force.rs         # VO TimeInForce (GTC, IOC, FOK)
+    │   │
+    │   ├── application/                     # ⭐ Camada de Aplicação (casos de uso, orquestração)
+    │   │   ├── mod.rs
+    │   │   ├── dtos/                        # Data Transfer Objects
+    │   │   │   ├── mod.rs
+    │   │   │   ├── commands.rs              # Command DTOs (ExecuteOrderCommand, SetStopLossCommand)
+    │   │   │   ├── signal_dto.rs            # DTO para sinais recebidos
+    │   │   │   ├── order_dto.rs             # DTO para ordens
+    │   │   │   ├── requests.rs              # HTTP request DTOs
+    │   │   │   └── responses.rs             # HTTP response DTOs
+    │   │   ├── ports/                       # ⚡ Ports (interfaces/contratos para adapters)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── signal_consumer_port.rs  # Contrato para consumir sinais do Kafka
+    │   │   │   ├── exchange_port.rs         # Contrato para executar ordens na exchange
+    │   │   │   ├── order_publisher_port.rs  # Contrato para publicar eventos de ordens
+    │   │   │   ├── price_stream_port.rs     # Contrato para stream de preços (para stops)
+    │   │   │   ├── order_repository_port.rs # Contrato para persistir ordens
+    │   │   │   ├── position_repository_port.rs # Contrato para persistir posições
+    │   │   │   └── event_store_port.rs      # Contrato para Event Sourcing
+    │   │   ├── queries/                     # Queries (CQRS read-side)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── get_order_history.rs     # Query: histórico de ordens
+    │   │   │   ├── get_active_positions.rs  # Query: posições abertas
+    │   │   │   └── get_pnl_summary.rs       # Query: resumo de P&L
+    │   │   └── services/                    # Application services (orquestração de casos de uso)
+    │   │       ├── mod.rs
+    │   │       ├── order_service.rs         # Caso de uso: processar sinal e executar ordem
+    │   │       ├── stop_service.rs          # Caso de uso: gerenciar stops
+    │   │       ├── position_service.rs      # Caso de uso: gerenciar posições
+    │   │       └── execution_orchestrator.rs # Orquestra: signal → validate → execute → monitor → publish
+    │   │
+    │   ├── infrastructure/                  # ⭐ Camada de Infraestrutura (implementações técnicas)
+    │   │   ├── mod.rs
+    │   │   ├── bootstrap/                   # Inicialização de componentes
+    │   │   │   ├── mod.rs
+    │   │   │   ├── database.rs              # Setup de conexão Postgres + migrations
+    │   │   │   ├── kafka_consumer.rs        # Inicializa consumer Kafka (sinais)
+    │   │   │   ├── kafka_publisher.rs       # Inicializa publisher Kafka (eventos)
+    │   │   │   ├── exchange.rs              # Inicializa conexão com exchange
+    │   │   │   └── price_stream.rs          # Inicializa stream de preços (para stops)
+    │   │   ├── config/                      # Configuração e settings
+    │   │   │   ├── mod.rs
+    │   │   │   ├── settings.rs              # Struct Settings + carregamento de env vars
+    │   │   │   └── risk_config.rs           # Configurações de risco (limites, drawdown)
+    │   │   ├── messaging/                   # Messaging & Event Streaming
+    │   │   │   ├── mod.rs
+    │   │   │   ├── kafka_signal_consumer.rs # Consumer de sinais (signals.buy/sell)
+    │   │   │   ├── kafka_order_publisher.rs # Publisher de eventos de ordens
+    │   │   │   └── signal_handler.rs        # Handler que processa sinais recebidos
+    │   │   ├── exchanges/                   # Implementações de exchanges (Adapters)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── binance_exchange.rs      # Implementa ExchangePort via binance-rs
+    │   │   │   ├── binance_connector.rs     # Implementa ExchangePort via binance-connector
+    │   │   │   ├── paper_exchange.rs        # Implementa ExchangePort para paper trading
+    │   │   │   └── exchange_error_mapper.rs # Mapeia erros da exchange para domain errors
+    │   │   ├── stops/                       # Gerenciamento de stops
+    │   │   │   ├── mod.rs
+    │   │   │   ├── stop_loss_manager.rs     # Monitora preços e dispara stop loss
+    │   │   │   ├── trailing_stop_manager.rs # Gerencia trailing stops
+    │   │   │   └── price_monitor.rs         # Monitora preços em tempo real (websocket)
+    │   │   ├── monitoring/                  # Monitoramento de ordens
+    │   │   │   ├── mod.rs
+    │   │   │   ├── order_monitor.rs         # Monitora status de ordens até conclusão
+    │   │   │   └── user_data_stream.rs      # User data stream da exchange (websocket)
+    │   │   ├── persistence/                 # Persistência (Postgres)
+    │   │   │   ├── mod.rs
+    │   │   │   ├── postgres_order_repository.rs     # Store de ordens
+    │   │   │   ├── postgres_position_repository.rs  # Store de posições
+    │   │   │   ├── postgres_execution_repository.rs # Store de execuções
+    │   │   │   └── postgres_event_store.rs          # Event Store (Event Sourcing)
+    │   │   ├── retry/                       # Retry e error handling
+    │   │   │   ├── mod.rs
+    │   │   │   ├── exponential_backoff.rs   # Retry com exponential backoff
+    │   │   │   └── idempotency_checker.rs   # Verifica se ordem já foi executada
+    │   │   ├── metrics/                     # Métricas e observabilidade
+    │   │   │   ├── mod.rs
+    │   │   │   └── prometheus_metrics.rs    # Registra métricas Prometheus
+    │   │   ├── shutdown/                    # Shutdown graceful
+    │   │   │   ├── mod.rs
+    │   │   │   ├── graceful.rs              # Coordena shutdown (cancela ordens pendentes, fecha conexões)
+    │   │   │   └── signal_handler.rs        # Captura sinais SIGTERM/SIGINT
+    │   │   └── startup/                     # Startup do aplicativo
+    │   │       ├── mod.rs
+    │   │       ├── banner.rs                # Banner ASCII no console
+    │   │       ├── health.rs                # Health checks
+    │   │       └── logging.rs               # Setup de logs (tracing-subscriber)
+    │   │
+    │   ├── presentation/                    # ⭐ Camada de Apresentação (HTTP, CLI futuro)
+    │   │   ├── mod.rs
+    │   │   └── http/                        # HTTP REST API (Axum)
+    │   │       ├── mod.rs
+    │   │       ├── router.rs                # Definição de rotas (endpoints)
+    │   │       ├── responses.rs             # Helpers de resposta (ApiResponse, ErrorResponse)
+    │   │       ├── controllers/             # Controllers HTTP
+    │   │       │   ├── mod.rs
+    │   │       │   ├── order_controller.rs  # Endpoints de ordens (get, cancel)
+    │   │       │   ├── position_controller.rs # Endpoints de posições
+    │   │       │   ├── stop_controller.rs   # Endpoints de stops
+    │   │       │   └── health_controller.rs # Health checks, metrics
+    │   │       └── middleware/              # Middlewares HTTP (logging, auth futuro)
+    │   │           ├── mod.rs
+    │   │           └── request_logger.rs    # Log de requests HTTP
+    │   │
+    │   └── shared/                          # ⭐ Shared Kernel (código transversal)
+    │       ├── mod.rs
+    │       ├── errors.rs                    # Erros compartilhados (ApplicationError, InfrastructureError)
+    │       ├── types.rs                     # Tipos compartilhados (EventEnvelope, Timestamp, etc.)
+    │       ├── traits/                      # Traits comuns
+    │       │   ├── mod.rs
+    │       │   └── aggregate_root.rs        # Trait AggregateRoot (apply_event, uncommitted_events)
+    │       └── utils/                       # Utilitários
+    │           ├── mod.rs
+    │           ├── datetime.rs              # Helpers de data/hora
+    │           ├── decimal.rs               # Helpers para aritmética decimal (preços)
+    │           └── validation.rs            # Validações genéricas
+    │
+    ├── config/                              # 📁 Configurações externas
+    │   ├── development.yaml                 # Config para ambiente dev
+    │   ├── production.yaml                  # Config para ambiente prod
+    │   └── risk_profiles/                   # Perfis de risco
+    │       ├── conservative.yaml            # Perfil conservador
+    │       ├── moderate.yaml                # Perfil moderado
+    │       └── aggressive.yaml              # Perfil agressivo
+    │
+    ├── migrations/                          # 📊 Migrações de banco (Flyway)
+    │   ├── V001__initial_schema.sql         # Schema inicial (orders, positions)
+    │   ├── V002__executions.sql             # Tabela de execuções
+    │   ├── V003__stops.sql                  # Tabela de stops
+    │   ├── V004__events.sql                 # Event Store
+    │   └── V005__indexes.sql                # Índices para performance
+    │
+    ├── docs/                                # 📚 Documentação técnica
+    │   ├── README.md                        # Índice de documentação
+    │   ├── ARCHITECTURE.md                  # Detalhes da arquitetura hexagonal
+    │   ├── RISK_MANAGEMENT.md               # Documentação de risk management
+    │   └── EXCHANGES.md                     # Documentação de integração com exchanges
+    │
+    ├── Cargo.toml                           # Configuração Rust (deps, features)
+    ├── Cargo.lock                           # Lock file de dependências
+    ├── Dockerfile                           # Build multi-stage production
+    ├── docker-compose.yml                   # Stack completa (app, Kafka, Postgres)
+    ├── Makefile                             # Comandos make (build, test, docker)
+    ├── crypto-trader_projectmap.yaml        # Este arquivo (documentação estruturada)
+    └── README.md                            # Documentação principal do projeto
+    
+  conventions:
+    domain_layer:
+      description: Camada de Domínio (domain/)
+      rules:
+        - ✅ Sem dependências de infraestrutura
+        - ✅ Lógica de negócio pura (validações, cálculos)
+        - ✅ Aggregates aplicam eventos e validam invariantes
+        - ✅ Value objects imutáveis com validação
+        - ✅ Services de domínio para lógica cross-aggregate
+        - ✅ Repositories como traits (contratos apenas)
+        
+    application_layer:
+      description: Camada de Aplicação (application/)
+      rules:
+        - ✅ Define Ports (interfaces) que infraestrutura implementa
+        - ✅ Orquestra casos de uso (signal → validate → execute)
+        - ✅ DTOs para comunicação entre camadas
+        - ✅ Queries para read-side (CQRS)
+        - ✅ Services orquestram múltiplos agregados/ports
+        - ✅ Não conhece detalhes de implementação (Binance, Kafka, etc)
+        
+    infrastructure_layer:
+      description: Camada de Infraestrutura (infrastructure/)
+      rules:
+        - ✅ Implementa Adapters (Binance, Kafka, Postgres)
+        - ✅ Bootstrap e configuração
+        - ✅ Messaging e streaming
+        - ✅ Persistence (Postgres + Event Store)
+        - ✅ Shutdown graceful
+        - ✅ Startup e health checks
+        - ✅ Retry e error handling
+        
+    presentation_layer:
+      description: Camada de Apresentação (presentation/)
+      rules:
+        - ✅ HTTP REST API (Axum)
+        - ✅ Controllers e routers
+        - ✅ Conversão DTOs <-> JSON
+        - ✅ Middlewares (logging, auth futuro)
+        - ✅ Não contém lógica de negócio
+        - ✅ Apenas coordena chamadas à Application
+        
+    shared_kernel:
+      description: Shared Kernel (shared/)
+      rules:
+        - ✅ Código compartilhado entre camadas
+        - ✅ Traits comuns (AggregateRoot)
+        - ✅ Tipos transversais (EventEnvelope)
+        - ✅ Utilitários (datetime, decimal, validação)
+        - ✅ Erros compartilhados
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 5. VALIDAÇÃO E RISK MANAGEMENT                               │
+# └─────────────────────────────────────────────────────────────┘
+
+validation_rules:
+  order_validation:
+    description: Validações antes de executar ordem
+    checks:
+      - name: Idempotência
+        rule: Verifica se ordem com mesmo client_order_id já foi executada
+        action: Se já existe, retorna resultado anterior
+        
+      - name: Duplicação temporal
+        rule: Verifica ordens similares nos últimos X segundos
+        threshold: 5 segundos
+        action: Rejeita se detectar duplicação
+        
+      - name: Quantidade mínima
+        rule: Verifica se quantidade >= minimum_order_size da exchange
+        source: Exchange info
+        
+      - name: Quantidade máxima
+        rule: Verifica se quantidade <= maximum_order_size da exchange
+        source: Exchange info
+        
+      - name: Saldo disponível
+        rule: Verifica se há saldo suficiente para executar ordem
+        consideration: Considera ordens pendentes
+        
+      - name: Preço válido
+        rule: Verifica se preço está dentro de tick_size
+        source: Exchange info
+        
+  risk_validation:
+    description: Validações de risk management
+    checks:
+      - name: Exposição por asset
+        rule: Posição atual + nova ordem <= max_exposure_per_asset
+        configurable: true
+        default: 1000 USDT
+        
+      - name: Exposição total
+        rule: Soma de todas as posições <= max_total_exposure
+        configurable: true
+        default: 5000 USDT
+        
+      - name: Drawdown máximo
+        rule: Loss acumulado <= max_drawdown
+        configurable: true
+        default: -20%
+        calculation: (current_balance - peak_balance) / peak_balance
+        
+      - name: Loss diário
+        rule: Loss do dia <= max_daily_loss
+        configurable: true
+        default: -500 USDT
+        reset: Diário às 00:00 UTC
+        
+      - name: Número máximo de posições
+        rule: Posições abertas < max_open_positions
+        configurable: true
+        default: 10
+        
+      - name: Confidence mínima
+        rule: Signal confidence >= min_confidence_threshold
+        configurable: true
+        default: 0.7
+        applies_to: Sinais externos
+
+risk_profiles:
+  conservative:
+    max_exposure_per_asset: 500 USDT
+    max_total_exposure: 2000 USDT
+    max_drawdown: -10%
+    max_daily_loss: -200 USDT
+    max_open_positions: 5
+    min_confidence_threshold: 0.8
+    
+  moderate:
+    max_exposure_per_asset: 1000 USDT
+    max_total_exposure: 5000 USDT
+    max_drawdown: -20%
+    max_daily_loss: -500 USDT
+    max_open_positions: 10
+    min_confidence_threshold: 0.7
+    
+  aggressive:
+    max_exposure_per_asset: 2000 USDT
+    max_total_exposure: 10000 USDT
+    max_drawdown: -30%
+    max_daily_loss: -1000 USDT
+    max_open_positions: 15
+    min_confidence_threshold: 0.6
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 6. TIPOS DE ORDEM E STOPS                                    │
+# └─────────────────────────────────────────────────────────────┘
+
+order_types:
+  market:
+    description: Ordem a mercado (execução imediata)
+    parameters:
+      - symbol: required
+      - side: required (BUY/SELL)
+      - quantity: required
+    execution: Imediata ao melhor preço disponível
+    use_case: Entrada rápida baseada em sinal
+    
+  limit:
+    description: Ordem limitada (preço específico)
+    parameters:
+      - symbol: required
+      - side: required
+      - quantity: required
+      - price: required
+      - time_in_force: optional (GTC default)
+    execution: Apenas ao preço especificado ou melhor
+    use_case: Entrada com controle de preço
+    
+  stop_loss:
+    description: Ordem de stop loss (venda automática)
+    parameters:
+      - symbol: required
+      - side: SELL (para posição LONG) ou BUY (para SHORT)
+      - quantity: required
+      - stop_price: required (preço de trigger)
+    execution: Vira ordem MARKET quando stop_price atingido
+    use_case: Proteção contra perdas
+    
+  stop_loss_limit:
+    description: Stop loss com preço limite
+    parameters:
+      - symbol: required
+      - side: required
+      - quantity: required
+      - stop_price: required
+      - price: required (preço limite após trigger)
+    execution: Vira ordem LIMIT quando stop_price atingido
+    use_case: Stop loss com controle de slippage
+    
+  take_profit:
+    description: Ordem de take profit (realização de lucro)
+    parameters:
+      - symbol: required
+      - side: SELL (para LONG) ou BUY (para SHORT)
+      - quantity: required
+      - stop_price: required (preço de trigger)
+    execution: Vira ordem MARKET quando stop_price atingido
+    use_case: Realização automática de lucro
+    
+  take_profit_limit:
+    description: Take profit com preço limite
+    parameters:
+      - symbol: required
+      - side: required
+      - quantity: required
+      - stop_price: required
+      - price: required
+    execution: Vira ordem LIMIT quando stop_price atingido
+    use_case: Take profit com controle de slippage
+
+stop_management:
+  stop_loss:
+    description: Gerenciamento de stop loss
+    behavior:
+      - Criado automaticamente após ordem de entrada executada
+      - Preço baseado em signal.stop_loss ou risk calculation
+      - Monitora preço em tempo real via websocket
+      - Cancela ordens relacionadas quando disparado
+      - Publica evento StopLossTriggered
+      
+  take_profit:
+    description: Gerenciamento de take profit
+    behavior:
+      - Criado automaticamente após entrada
+      - Preço baseado em signal.take_profit
+      - Pode ser parcial (vender X% da posição)
+      - Cancela stop loss quando disparado
+      
+  trailing_stop:
+    description: Trailing stop dinâmico
+    types:
+      - percentage: Ajusta stop baseado em % do preço
+      - fixed: Ajusta stop mantendo distância fixa
+    behavior:
+      - Monitora preço continuamente
+      - Ajusta stop_price quando preço move a favor
+      - Nunca move stop contra a posição
+      - Dispara quando preço retrai até stop_price
+    example_percentage: |
+      Entry: 100 USDT
+      Trailing: 5%
+      
+      Preço sobe para 110 → Stop ajusta para 104.5 (110 - 5%)
+      Preço sobe para 120 → Stop ajusta para 114 (120 - 5%)
+      Preço cai para 114 → Stop disparado (lucro de 14%)
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 7. FLUXOS PRINCIPAIS                                         │
+# └─────────────────────────────────────────────────────────────┘
+
+flows:
+  signal_to_order:
+    description: Fluxo completo de sinal até ordem executada
+    steps:
+      - step: 1
+        component: Kafka Consumer
+        action: Consome sinal do tópico signals.buy
+        
+      - step: 2
+        component: Signal Handler
+        action: Deserializa e cria SignalDTO
+        
+      - step: 3
+        component: Order Service
+        action: Cria ExecuteOrderCommand
+        
+      - step: 4
+        component: Order Validator
+        action: |
+          - Verifica idempotência (client_order_id)
+          - Valida quantidade (min/max)
+          - Verifica duplicação temporal
+          - Valida preço e tick size
+        result: OK ou ValidationError
+        
+      - step: 5
+        component: Risk Validator
+        action: |
+          - Calcula exposição atual
+          - Verifica limites (per asset, total)
+          - Verifica drawdown
+          - Verifica loss diário
+          - Valida confidence do sinal
+        result: OK ou RiskViolationError
+        
+      - step: 6
+        component: Position Calculator
+        action: |
+          - Calcula tamanho de posição (se não especificado)
+          - Baseado em: risco %, saldo, stop loss
+        
+      - step: 7
+        component: Order Executor
+        action: |
+          - Cria ordem na exchange (Binance API)
+          - Retry com exponential backoff (se timeout)
+          - Valida resposta
+        result: Order ou ExchangeError
+        
+      - step: 8
+        component: Order Monitor
+        action: |
+          - Aguarda confirmação de execução
+          - User data stream ou polling
+          - Timeout configurável (30s)
+        
+      - step: 9
+        component: Stop Service
+        action: |
+          - Cria stop loss automático
+          - Cria take profit (se especificado)
+          - Ou configura trailing stop
+        
+      - step: 10
+        component: Event Publisher
+        action: |
+          - Publica orders.events (CREATED)
+          - Publica orders.events (FILLED)
+        
+      - step: 11
+        component: Order Repository
+        action: Persiste ordem e execução no banco
+        
+      - step: 12
+        component: Metrics
+        action: |
+          - Incrementa orders_executed_total
+          - Registra latência
+          - Atualiza exposição
+
+    example_trace: |
+      [Consumer] Received signal: BUY BTCUSDT @ 45000
+      [Handler] Signal parsed: strategy=RSI_DIVERGENCE, confidence=0.85
+      [OrderValidator] Validation OK (no duplicate, valid quantity)
+      [RiskValidator] Risk OK (exposure: 450/1000, drawdown: -5%/-20%)
+      [PositionCalculator] Position size: 0.01 BTC (1% risk, stop @ 44000)
+      [OrderExecutor] Binance API: createOrder(BTCUSDT, BUY, 0.01, MARKET)
+      [Exchange] Response: orderId=12345, status=FILLED, avgPrice=45023.50
+      [StopService] Created stop loss @ 44000 (orderId=12346)
+      [Publisher] Published: orders.events (FILLED)
+      [Repository] Persisted order and execution
+      [Metrics] orders_executed_total{symbol="BTCUSDT",side="BUY"} +1
+
+  stop_loss_trigger:
+    description: Fluxo de disparo de stop loss
+    steps:
+      - step: 1
+        component: Price Monitor
+        action: Monitora preço via websocket (crypto-listener.prices)
+        
+      - step: 2
+        component: Stop Loss Manager
+        action: |
+          - Compara preço atual com stop_price
+          - BTC @ 43950, stop @ 44000 → TRIGGER
+          
+      - step: 3
+        component: Order Executor
+        action: |
+          - Cancela take profit (se existir)
+          - Executa venda a mercado
+          
+      - step: 4
+        component: Position Service
+        action: |
+          - Atualiza posição (fechada)
+          - Calcula P&L final
+          
+      - step: 5
+        component: Event Publisher
+        action: |
+          - Publica orders.events (STOP_TRIGGERED)
+          - Publica orders.events (FILLED)
+          
+      - step: 6
+        component: Metrics
+        action: |
+          - stop_losses_triggered_total +1
+          - Atualiza drawdown
+
+  trailing_stop_adjustment:
+    description: Fluxo de ajuste de trailing stop
+    steps:
+      - step: 1
+        component: Price Monitor
+        action: Preço atualizado (BTC @ 46500)
+        
+      - step: 2
+        component: Trailing Stop Manager
+        action: |
+          - Entry: 45000, Trailing: 5%
+          - Novo stop: 46500 * 0.95 = 44175
+          - Stop anterior: 42750
+          - 44175 > 42750 → AJUSTAR
+          
+      - step: 3
+        component: Order Executor
+        action: |
+          - Cancela stop antigo
+          - Cria novo stop @ 44175
+          
+      - step: 4
+        component: Event Publisher
+        action: Publica stop_events (TRAILING_STOP_ADJUSTED)
+        
+      - step: 5
+        component: Metrics
+        action: trailing_stop_adjustments_total +1
+
+  order_rejection:
+    description: Fluxo de rejeição de ordem
+    reasons:
+      - Validation failure
+      - Risk violation
+      - Exchange error
+      - Insufficient balance
+    steps:
+      - step: 1-5
+        action: Fluxo normal até validação
+        
+      - step: 6
+        component: Validator
+        action: Detecta violação
+        error: RiskViolationError (max_exposure_per_asset exceeded)
+        
+      - step: 7
+        component: Order Service
+        action: Cria OrderRejected event
+        
+      - step: 8
+        component: Event Publisher
+        action: Publica orders.events (REJECTED)
+        
+      - step: 9
+        component: Metrics
+        action: orders_rejected_total{reason="risk_violation"} +1
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 8. CONFIGURAÇÃO                                              │
+# └─────────────────────────────────────────────────────────────┘
+
+configuration:
+  format: YAML + Environment Variables
+  precedence: ENV > config file > defaults
+  
+  files:
+    development: config/development.yaml
+    production: config/production.yaml
+    risk_profiles: config/risk_profiles/*.yaml
+    
+  structure:
+    mode:
+      env: TRADING_MODE
+      values: [PAPER, LIVE, DRY_RUN]
+      default: PAPER
+      description: |
+        PAPER: simula execuções (não envia para exchange)
+        LIVE: executa ordens reais
+        DRY_RUN: valida mas não executa
+        
+    kafka:
+      brokers:
+        env: KAFKA_BROKERS
+        default: "localhost:9092"
+      consumer_group:
+        env: KAFKA_CONSUMER_GROUP
+        default: "crypto-trader-group"
+      topics:
+        signals_buy: "signals.buy"
+        signals_sell: "signals.sell"
+        orders_events: "orders.events"
+        
+    exchange:
+      name:
+        env: EXCHANGE_NAME
+        default: "binance"
+        values: [binance, paper]
+      api_key:
+        env: EXCHANGE_API_KEY
+        required_if: mode == LIVE
+      api_secret:
+        env: EXCHANGE_API_SECRET
+        required_if: mode == LIVE
+      testnet:
+        env: EXCHANGE_TESTNET
+        default: false
+      timeout_ms:
+        env: EXCHANGE_TIMEOUT_MS
+        default: 5000
+        
+    risk:
+      profile:
+        env: RISK_PROFILE
+        default: "moderate"
+        values: [conservative, moderate, aggressive, custom]
+      max_exposure_per_asset:
+        env: RISK_MAX_EXPOSURE_PER_ASSET
+        default: 1000.00
+        unit: USDT
+      max_total_exposure:
+        env: RISK_MAX_TOTAL_EXPOSURE
+        default: 5000.00
+        unit: USDT
+      max_drawdown:
+        env: RISK_MAX_DRAWDOWN
+        default: -0.20
+        unit: percentage
+      max_daily_loss:
+        env: RISK_MAX_DAILY_LOSS
+        default: 500.00
+        unit: USDT
+      max_open_positions:
+        env: RISK_MAX_OPEN_POSITIONS
+        default: 10
+      min_confidence_threshold:
+        env: RISK_MIN_CONFIDENCE
+        default: 0.7
+        
+    stops:
+      auto_stop_loss:
+        env: STOPS_AUTO_STOP_LOSS
+        default: true
+        description: Criar stop loss automaticamente
+      default_stop_loss_percent:
+        env: STOPS_DEFAULT_STOP_LOSS_PERCENT
+        default: 0.02
+        description: 2% abaixo do preço de entrada
+      auto_take_profit:
+        env: STOPS_AUTO_TAKE_PROFIT
+        default: false
+      default_take_profit_percent:
+        env: STOPS_DEFAULT_TAKE_PROFIT_PERCENT
+        default: 0.05
+      enable_trailing_stop:
+        env: STOPS_ENABLE_TRAILING
+        default: false
+      trailing_stop_percent:
+        env: STOPS_TRAILING_PERCENT
+        default: 0.05
+        
+    execution:
+      order_timeout_seconds:
+        env: EXECUTION_ORDER_TIMEOUT
+        default: 30
+      retry_max_attempts:
+        env: EXECUTION_RETRY_MAX_ATTEMPTS
+        default: 3
+      retry_initial_delay_ms:
+        env: EXECUTION_RETRY_INITIAL_DELAY
+        default: 1000
+        
+    database:
+      url:
+        env: DATABASE_URL
+        required: true
+      pool_size:
+        env: DATABASE_POOL_SIZE
+        default: 10
+        
+    metrics:
+      enabled:
+        env: METRICS_ENABLED
+        default: true
+      port:
+        env: METRICS_PORT
+        default: 9090
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 9. MÉTRICAS E OBSERVABILIDADE                                │
+# └─────────────────────────────────────────────────────────────┘
+
+metrics:
+  prometheus_endpoint: /metrics
+  port: 9090
+  
+  counters:
+    - name: signals_received_total
+      help: Total de sinais recebidos
+      labels: [symbol, side, strategy, source]
+      
+    - name: orders_executed_total
+      help: Total de ordens executadas com sucesso
+      labels: [symbol, side, order_type, strategy]
+      
+    - name: orders_rejected_total
+      help: Total de ordens rejeitadas
+      labels: [symbol, reason]
+      
+    - name: stop_losses_triggered_total
+      help: Total de stop losses disparados
+      labels: [symbol]
+      
+    - name: take_profits_triggered_total
+      help: Total de take profits disparados
+      labels: [symbol]
+      
+    - name: trailing_stop_adjustments_total
+      help: Total de ajustes de trailing stop
+      labels: [symbol]
+      
+    - name: positions_opened_total
+      help: Total de posições abertas
+      labels: [symbol, side]
+      
+    - name: positions_closed_total
+      help: Total de posições fechadas
+      labels: [symbol, reason]
+      
+  histograms:
+    - name: order_execution_duration_seconds
+      help: Duração da execução de ordem
+      labels: [symbol, order_type]
+      buckets: [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+      
+    - name: signal_to_execution_duration_seconds
+      help: Duração total (receber sinal até executar)
+      labels: [symbol]
+      buckets: [0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
+      
+    - name: pnl_per_trade
+      help: P&L por trade
+      labels: [symbol, strategy]
+      buckets: [-1000, -500, -100, 0, 100, 500, 1000, 5000]
+      
+  gauges:
+    - name: active_positions
+      help: Número de posições abertas
+      labels: [symbol]
+      
+    - name: total_exposure
+      help: Exposição total em USDT
+      labels: []
+      
+    - name: current_drawdown
+      help: Drawdown atual
+      labels: []
+      
+    - name: daily_pnl
+      help: P&L do dia atual
+      labels: []
+      
+    - name: account_balance
+      help: Saldo da conta
+      labels: [asset]
+
+  logging:
+    format: JSON (structured logging)
+    level: INFO (configurável via env)
+    fields:
+      - timestamp
+      - level
+      - message
+      - symbol
+      - order_id
+      - signal_id
+      - strategy
+      - duration_ms
+      - error (if any)
+
+  tracing:
+    enabled: true
+    library: tracing / tracing-subscriber
+    spans:
+      - name: process_signal
+        fields: [signal_id, symbol, strategy]
+      - name: validate_order
+        fields: [order_id, validations]
+      - name: execute_order
+        fields: [order_id, symbol, side]
+      - name: monitor_stop
+        fields: [stop_id, symbol, stop_price]
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 10. INSTRUÇÕES DE DESENVOLVIMENTO                            │
+# └─────────────────────────────────────────────────────────────┘
+
+development_instructions:
+  setup:
+    prerequisites:
+      - Rust 1.75+ (rustup)
+      - Docker & Docker Compose
+      - Postgres client (psql)
+      - Kafka client (kafkacat/kcat)
+      - Binance testnet account (para testes)
+      
+    steps:
+      - step: 1
+        action: Clone o repositório
+        command: git clone <repo-url> && cd crypto-trader
+        
+      - step: 2
+        action: Copie o arquivo de configuração
+        command: cp .env.example .env
+        
+      - step: 3
+        action: Configure as variáveis de ambiente
+        details: |
+          Edite .env e configure:
+          - TRADING_MODE=PAPER (começar com paper trading)
+          - EXCHANGE_API_KEY (se usar testnet/live)
+          - EXCHANGE_API_SECRET (se usar testnet/live)
+          - DATABASE_URL
+          - KAFKA_BROKERS
+          
+      - step: 4
+        action: Inicie dependências
+        command: docker-compose up -d kafka postgres
+        
+      - step: 5
+        action: Execute migrations
+        command: cargo run --bin migrate
+        
+      - step: 6
+        action: Instale dependências Rust
+        command: cargo build
+        
+      - step: 7
+        action: Execute o serviço
+        command: cargo run
+        
+  testing_orders:
+    manual_signal:
+      description: Publicar sinal de teste no Kafka
+      command: |
+        echo '{
+          "symbol": "BTCUSDT",
+          "strategy": "MANUAL_TEST",
+          "source": "internal",
+          "confidence": 0.9,
+          "target_price": 45000.00,
+          "stop_loss": 44000.00,
+          "take_profit": 47000.00,
+          "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+        }' | kcat -P -b localhost:9092 -t signals.buy
+        
+    check_execution:
+      description: Verificar ordem executada
+      command: |
+        # Via API
+        curl http://localhost:8080/api/orders/recent
+        
+        # Via banco
+        psql $DATABASE_URL -c "SELECT * FROM orders ORDER BY created_at DESC LIMIT 5;"
+        
+    monitor_positions:
+      description: Monitorar posições abertas
+      command: |
+        curl http://localhost:8080/api/positions/active
+        
+  debugging:
+    logs:
+      command: RUST_LOG=debug cargo run
+      
+    dry_run_mode:
+      description: Validar sem executar
+      command: TRADING_MODE=DRY_RUN cargo run
+      
+    kafka_monitoring:
+      consumer_lag: |
+        kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+          --group crypto-trader-group --describe
+          
+      consume_signals: |
+        kcat -C -b localhost:9092 -t signals.buy
+        
+      consume_orders: |
+        kcat -C -b localhost:9092 -t orders.events
+        
+    database_queries:
+      active_orders: |
+        SELECT * FROM orders WHERE status IN ('NEW', 'PARTIALLY_FILLED');
+        
+      active_positions: |
+        SELECT * FROM positions WHERE status = 'OPEN';
+        
+      daily_pnl: |
+        SELECT SUM(pnl) FROM executions 
+        WHERE DATE(created_at) = CURRENT_DATE;
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 11. TROUBLESHOOTING                                          │
+# └─────────────────────────────────────────────────────────────┘
+
+troubleshooting:
+  common_issues:
+    - issue: "Ordens não sendo executadas"
+      causes:
+        - TRADING_MODE não configurado para LIVE
+        - API keys inválidas
+        - Validação de risco falhando
+        - Saldo insuficiente
+      solutions:
+        - Verificar TRADING_MODE: echo $TRADING_MODE
+        - Testar API keys: cargo run --bin test-exchange-connection
+        - Verificar logs de validação: RUST_LOG=debug
+        - Verificar métricas de rejeição: curl localhost:9090/metrics | grep rejected
+        
+    - issue: "Orders rejeitadas por risk violation"
+      causes:
+        - Exposição máxima atingida
+        - Drawdown máximo atingido
+        - Loss diário excedido
+      solutions:
+        - Verificar exposição atual: curl localhost:8080/api/risk/status
+        - Ajustar limites: editar config/production.yaml
+        - Resetar daily loss (novo dia)
+        
+    - issue: "Stop loss não disparando"
+      causes:
+        - Price monitor não conectado
+        - crypto-listener não publicando preços
+        - WebSocket desconectado
+      solutions:
+        - Verificar health: curl localhost:8080/health
+        - Verificar tópico de preços: kcat -C -b localhost:9092 -t crypto-listener.prices
+        - Verificar logs do price monitor
+        
+    - issue: "Latência alta (signal → execution)"
+      causes:
+        - Kafka lag
+        - Validações lentas
+        - Exchange API lenta
+      solutions:
+        - Verificar consumer lag
+        - Verificar métricas: signal_to_execution_duration_seconds
+        - Otimizar validações (cache)
+        - Aumentar timeout se necessário
+        
+  health_checks:
+    service_health:
+      endpoint: GET /health
+      expected_response: |
+        {
+          "status": "healthy",
+          "version": "1.0.0",
+          "mode": "LIVE",
+          "components": {
+            "kafka_consumer": "connected",
+            "exchange": "connected",
+            "database": "connected",
+            "price_monitor": "active"
+          },
+          "risk_status": {
+            "total_exposure": 2500.00,
+            "max_total_exposure": 5000.00,
+            "current_drawdown": -0.05,
+            "max_drawdown": -0.20,
+            "daily_pnl": 150.00
+          }
+        }
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 12. ROADMAP & MELHORIAS FUTURAS                              │
+# └─────────────────────────────────────────────────────────────┘
+
+roadmap:
+  v1_0:
+    status: Current
+    features:
+      - ✅ Execução de ordens baseada em sinais
+      - ✅ Validação de risco
+      - ✅ Stop loss automático
+      - ✅ Take profit
+      - ✅ Trailing stops
+      - ✅ Paper trading
+      - ✅ Binance integration
+      
+  v1_1:
+    planned_features:
+      - Partial take profit (vender X% da posição)
+      - OCO orders (One-Cancels-the-Other)
+      - Grid trading support
+      - Average down / scale in
+      - Backtesting framework
+      
+  v2_0:
+    planned_features:
+      - Multi-exchange support (Bybit, OKX)
+      - Advanced order types (Iceberg, TWAP)
+      - Portfolio rebalancing automático
+      - Tax reporting
+      - AI-powered position sizing
+      - Sentiment-based adjustments
+      
+  future_considerations:
+    - Futures e margin trading
+    - Options trading
+    - Copy trading (seguir outros traders)
+    - Social trading features
+    - Mobile app para monitoramento
+    - Alerts via SMS/Push
+
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │ 13. REFERÊNCIAS E DOCUMENTAÇÃO                               │
+# └─────────────────────────────────────────────────────────────┘
+
+references:
+  exchange_apis:
+    binance:
+      - name: Binance Spot API
+        url: https://binance-docs.github.io/apidocs/spot/en/
+      - name: Binance Testnet
+        url: https://testnet.binance.vision/
+        
+  rust_libraries:
+    - name: binance-rs
+      url: https://docs.rs/binance
+      
+    - name: rust-decimal
+      url: https://docs.rs/rust_decimal
+      description: Para cálculos precisos de preços
+      
+    - name: tokio
+      url: https://tokio.rs
+      
+    - name: rdkafka
+      url: https://docs.rs/rdkafka
+      
+  trading_concepts:
+    - Stop Loss
+    - Take Profit
+    - Trailing Stop
+    - Position Sizing
+    - Risk Management
+    - Order Types (Market, Limit, Stop)
+    - Time In Force (GTC, IOC, FOK)
+    
+  architecture_patterns:
+    - Event-Driven Architecture
+    - Hexagonal Architecture (Ports & Adapters)
+    - Domain-Driven Design (DDD)
+    - Event Sourcing
+    - CQRS (Command Query Responsibility Segregation)
+    - Retry Pattern
+    - Circuit Breaker Pattern
+
+
+# ════════════════════════════════════════════════════════════════
+# FIM DO PROJECT MAP
+# ════════════════════════════════════════════════════════════════
