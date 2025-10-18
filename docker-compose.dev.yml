@@ -114,32 +114,31 @@ services:
     depends_on:
       schema-registry:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     volumes:
       - ./schemas:/schemas:ro
+      - ./scripts:/scripts:ro
+    environment:
+      KAFKA_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
     entrypoint: ["sh","-c"]
     command: >
-      python - <<'PY'
-      import time, os, json, urllib.request
-      url = "http://schema-registry:8081"
-      for _ in range(60):
-          try:
-              urllib.request.urlopen(url + "/subjects")
-              break
-          except Exception:
-              time.sleep(1)
-      for fname in os.listdir('/schemas'):
-          if not fname.endswith('.avsc'):
-              continue
-          subj = os.path.splitext(fname)[0]
-          with open('/schemas/' + fname, 'r') as f:
-              s = f.read()
-          data = json.dumps({"schema": s})
-          req = urllib.request.Request(url + f"/subjects/{subj}-value/versions", data=data.encode('utf-8'), headers={'Content-Type':'application/vnd.schemaregistry.v1+json'})
-          try:
-              resp = urllib.request.urlopen(req)
-              print(fname, '->', resp.read().decode('utf-8'))
-          except Exception as e:
-              print('error registering', fname, e)
-      PY
+      python -u /scripts/schema-registry/schema-registry-init.py
+    restart: "no"
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./scripts:/scripts:ro
+    environment:
+      KAFKA_BROKER: "kafka:9092"
+      KAFKA_PARTITIONS: "3"
+      KAFKA_REPLICATION_FACTOR: "1"
+    entrypoint: ["sh", "-c"]
+    command: >
+      /scripts/kafka/kafka_init.sh
+    restart: "no"
 volumes:
   pgdata: {}
