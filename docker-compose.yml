@@ -10,7 +10,7 @@ services:
       KAFKA_BROKERS: "kafka:9092"
       KAFKA_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
       REDIS_URL: "redis://redis:6379"
-      # As demais variáveis (APP__*, RUST_LOG, etc.) são carregadas a partir de .env
+      # As demais variáveis (RUST_LOG, etc.) são carregadas a partir de .env
     ports:
       - "9080:8080"
     depends_on:

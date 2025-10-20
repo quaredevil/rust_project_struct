@@ -158,20 +158,20 @@ impl Settings {
         // Load `.env` file if present so dotenv values populate the process environment before `config` reads it.
         let _ = dotenvy::dotenv().ok();
 
-        // Base hierarchical loading (legacy APP__ prefix style still supported for non-Kafka groups)
-        let builder = config::Config::builder().add_source(config::Environment::with_prefix("APP").separator("__"));
+        // Base hierarchical loading without prefix (direct env var names)
+        let builder = config::Config::builder();
         let mut settings = builder.build().and_then(|c| c.try_deserialize::<Settings>()).unwrap_or_else(|_| Settings::default());
 
         // Helper to choose first non-empty env var among candidates
         let pick = |candidates: &[&str]| -> Option<String> { for &k in candidates { if let Ok(v) = std::env::var(k) { if !v.is_empty() { return Some(v); } } } None };
 
-        // Preferred new names: KAFKA_* (single underscore). Legacy supported: KAFKA__* and APP__KAFKA__*
-        if let Some(v) = pick(&["KAFKA_BROKERS", "KAFKA__BROKERS", "APP__KAFKA__BROKERS"]) { settings.kafka.brokers = v; }
-        if let Some(v) = pick(&["KAFKA_TOPIC", "KAFKA__TOPIC", "APP__KAFKA__TOPIC"]) { settings.kafka.topic = v; }
-        if let Some(v) = pick(&["KAFKA_SCHEMA_REGISTRY_URL", "KAFKA__SCHEMA_REGISTRY_URL", "APP__KAFKA__SCHEMA_REGISTRY_URL"]) { settings.kafka.schema_registry_url = Some(v); }
-        if let Some(v) = pick(&["KAFKA_PUBLISH_QUEUE_CAPACITY", "KAFKA__PUBLISH_QUEUE_CAPACITY", "APP__KAFKA__PUBLISH_QUEUE_CAPACITY"]) { if let Ok(n) = v.parse() { settings.kafka.publish_queue_capacity = Some(n); } }
-        if let Some(v) = pick(&["KAFKA_MAX_RETRY_ATTEMPTS", "KAFKA__MAX_RETRY_ATTEMPTS", "APP__KAFKA__MAX_RETRY_ATTEMPTS"]) { if let Ok(n) = v.parse() { settings.kafka.max_retry_attempts = Some(n); } }
-        if let Some(v) = pick(&["KAFKA_RETRY_BACKOFF_MS", "KAFKA__RETRY_BACKOFF_MS", "APP__KAFKA__RETRY_BACKOFF_MS"]) { if let Ok(n) = v.parse() { settings.kafka.retry_backoff_ms = Some(n); } }
+        // Use single underscore environment variables
+        if let Some(v) = pick(&["KAFKA_BROKERS"]) { settings.kafka.brokers = v; }
+        if let Some(v) = pick(&["KAFKA_TOPIC"]) { settings.kafka.topic = v; }
+        if let Some(v) = pick(&["KAFKA_SCHEMA_REGISTRY_URL"]) { settings.kafka.schema_registry_url = Some(v); }
+        if let Some(v) = pick(&["KAFKA_PUBLISH_QUEUE_CAPACITY"]) { if let Ok(n) = v.parse() { settings.kafka.publish_queue_capacity = Some(n); } }
+        if let Some(v) = pick(&["KAFKA_MAX_RETRY_ATTEMPTS"]) { if let Ok(n) = v.parse() { settings.kafka.max_retry_attempts = Some(n); } }
+        if let Some(v) = pick(&["KAFKA_RETRY_BACKOFF_MS"]) { if let Ok(n) = v.parse() { settings.kafka.retry_backoff_ms = Some(n); } }
 
         // Load multiple topic configurations
         if let Some(v) = pick(&["KAFKA_TOPIC_PRICES"]) { settings.topics.prices = v; }
@@ -179,12 +179,12 @@ impl Settings {
         if let Some(v) = pick(&["KAFKA_TOPIC_UNSUBSCRIPTION_COMMANDS"]) { settings.topics.unsubscription_commands = v; }
 
         // Market/WebSocket settings
-        if let Some(v) = pick(&["MARKET_WS_MAX_RECONNECT_ATTEMPTS", "APP__MARKET__WS_MAX_RECONNECT_ATTEMPTS"]) { if let Ok(n) = v.parse() { settings.market.ws_max_reconnect_attempts = Some(n); } }
-        if let Some(v) = pick(&["MARKET_WS_RECONNECT_DELAY_MS", "APP__MARKET__WS_RECONNECT_DELAY_MS"]) { if let Ok(n) = v.parse() { settings.market.ws_reconnect_delay_ms = Some(n); } }
+        if let Some(v) = pick(&["MARKET_WS_MAX_RECONNECT_ATTEMPTS"]) { if let Ok(n) = v.parse() { settings.market.ws_max_reconnect_attempts = Some(n); } }
+        if let Some(v) = pick(&["MARKET_WS_RECONNECT_DELAY_MS"]) { if let Ok(n) = v.parse() { settings.market.ws_reconnect_delay_ms = Some(n); } }
 
         // Database settings
-        if let Some(v) = pick(&["DATABASE_MAX_CONNECT_ATTEMPTS", "APP__DATABASE__MAX_CONNECT_ATTEMPTS"]) { if let Ok(n) = v.parse() { settings.database.max_connect_attempts = Some(n); } }
-        if let Some(v) = pick(&["DATABASE_CONNECT_RETRY_DELAY_MS", "APP__DATABASE__CONNECT_RETRY_DELAY_MS"]) { if let Ok(n) = v.parse() { settings.database.connect_retry_delay_ms = Some(n); } }
+        if let Some(v) = pick(&["DATABASE_MAX_CONNECT_ATTEMPTS"]) { if let Ok(n) = v.parse() { settings.database.max_connect_attempts = Some(n); } }
+        if let Some(v) = pick(&["DATABASE_CONNECT_RETRY_DELAY_MS"]) { if let Ok(n) = v.parse() { settings.database.connect_retry_delay_ms = Some(n); } }
 
         settings
     }

@@ -213,7 +213,7 @@ impl Settings {
             // 2. Sobrescrever com variáveis de ambiente
             .add_source(
                 config::Environment::with_prefix("APP")
-                    .separator("__")      // APP__KAFKA__BROKERS
+                    .separator("_")      // KAFKA_BROKERS
                     .try_parsing(true)    // Parse tipos (bool, int, etc)
             )
             .build()?;
@@ -225,9 +225,9 @@ impl Settings {
 
 ### Convenções de Configuração
 
-1. **Prefixo padrão**: `APP__`
-2. **Separador**: `__` (double underscore)
-3. **Exemplo**: `APP__KAFKA__BROKERS=localhost:9092`
+1. **Sem prefixo** para variáveis de ambiente
+2. **Separador**: `_` (single underscore)
+3. **Exemplo**: `KAFKA_BROKERS=localhost:9092`
 4. **Sempre ter defaults razoáveis**
 5. **Version vem de Cargo.toml**: `env!("CARGO_PKG_VERSION")`
 
@@ -235,24 +235,24 @@ impl Settings {
 
 ```bash
 # Application
-APP__APP__NAME=crypto-notifications
-APP__APP__VERSION=1.0.0
-APP__APP__HOST=0.0.0.0
-APP__APP__PORT=8080
-APP__APP__LOG_LEVEL=info
+APP_NAME=crypto-notifications
+APP_VERSION=1.0.0
+APP_HOST=0.0.0.0
+APP_PORT=8080
+APP_LOG_LEVEL=info
 
 # Kafka
-APP__KAFKA__BROKERS=localhost:9092
-APP__KAFKA__CONSUMER_GROUP=crypto-notifications-group
-APP__KAFKA__TOPIC_INPUT=crypto_notification
-APP__KAFKA__AUTO_OFFSET_RESET=earliest
-APP__KAFKA__SCHEMA_REGISTRY_URL=http://localhost:8081
+KAFKA_BROKERS=localhost:9092
+KAFKA_CONSUMER_GROUP=crypto-notifications-group
+KAFKA_TOPIC_INPUT=crypto_notification
+KAFKA_AUTO_OFFSET_RESET=earliest
+KAFKA_SCHEMA_REGISTRY_URL=http://localhost:8081
 
 # Database (se aplicável)
-APP__DATABASE__URL=postgresql://user:pass@localhost:5432/db
+DATABASE_URL=postgresql://user:pass@localhost:5432/db
 
 # Redis (se aplicável)
-APP__REDIS__URL=redis://localhost:6379
+REDIS_URL=redis://localhost:6379
 ```
 
 ---
@@ -1122,9 +1122,9 @@ services:
     build: .
     container_name: crypto-your-service
     environment:
-      APP__APP__LOG_LEVEL: info
-      APP__KAFKA__BROKERS: kafka:9092
-      APP__REDIS__URL: redis://redis:6379
+      APP_LOG_LEVEL: info
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379
     depends_on:
       - kafka
       - redis
@@ -1421,4 +1421,3 @@ Cada serviço deve expor:
 **Última atualização**: 2025-10-17  
 **Versão do documento**: 1.0.0  
 **Baseado em**: crypto-notifications v1.0.0
-
