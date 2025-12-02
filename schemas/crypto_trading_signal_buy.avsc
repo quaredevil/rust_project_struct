@@ -1,0 +1,76 @@
+{
+  "type": "record",
+  "name": "SignalBuy",
+  "namespace": "com.crypto.trading.signals",
+  "doc": "Trading buy signal from crypto-signals or crypto-webhook",
+  "fields": [
+    {
+      "name": "signal_id",
+      "type": "string",
+      "doc": "Unique signal identifier"
+    },
+    {
+      "name": "symbol",
+      "type": "string",
+      "doc": "Trading pair (e.g., BTCUSDT)"
+    },
+    {
+      "name": "strategy",
+      "type": "string",
+      "doc": "Strategy name that generated the signal"
+    },
+    {
+      "name": "source",
+      "type": {
+        "type": "enum",
+        "name": "SignalSource",
+        "symbols": ["INTERNAL", "TRADINGVIEW", "EXTERNAL"]
+      },
+      "doc": "Signal source"
+    },
+    {
+      "name": "confidence",
+      "type": "double",
+      "doc": "Signal confidence level (0.0 to 1.0)"
+    },
+    {
+      "name": "target_price",
+      "type": "double",
+      "doc": "Target entry price"
+    },
+    {
+      "name": "stop_loss",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Suggested stop loss price"
+    },
+    {
+      "name": "take_profit",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Suggested take profit price"
+    },
+    {
+      "name": "quantity",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Suggested quantity (if not provided, calculate based on risk)"
+    },
+    {
+      "name": "metadata",
+      "type": ["null", {
+        "type": "map",
+        "values": "string"
+      }],
+      "default": null,
+      "doc": "Additional strategy metadata"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Signal generation timestamp"
+    }
+  ]
+}
+

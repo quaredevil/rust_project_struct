@@ -1,0 +1,77 @@
+{
+  "type": "record",
+  "name": "NotificationDelivered",
+  "namespace": "com.crypto.notifications.events",
+  "doc": "Event emitted when a notification is successfully delivered",
+  "fields": [
+    {
+      "name": "notification_id",
+      "type": "string",
+      "doc": "Unique notification identifier (UUID)"
+    },
+    {
+      "name": "channel",
+      "type": {
+        "type": "enum",
+        "name": "DeliveredChannel",
+        "symbols": ["TELEGRAM", "DISCORD", "EMAIL", "WEBHOOK"]
+      },
+      "doc": "Channel through which notification was delivered"
+    },
+    {
+      "name": "priority",
+      "type": {
+        "type": "enum",
+        "name": "DeliveredPriority",
+        "symbols": ["LOW", "NORMAL", "HIGH", "CRITICAL"]
+      },
+      "doc": "Priority level of delivered notification"
+    },
+    {
+      "name": "category",
+      "type": {
+        "type": "enum",
+        "name": "DeliveredCategory",
+        "symbols": ["ORDER", "POSITION", "SIGNAL", "ALERT", "REPORT", "SYSTEM"]
+      },
+      "doc": "Category of delivered notification"
+    },
+    {
+      "name": "user_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "User ID if user-specific notification"
+    },
+    {
+      "name": "delivered_at",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Timestamp when notification was successfully delivered"
+    },
+    {
+      "name": "response_time_ms",
+      "type": "long",
+      "doc": "Time taken to deliver notification in milliseconds"
+    },
+    {
+      "name": "attempt_number",
+      "type": "int",
+      "doc": "Delivery attempt number (1 for first attempt success)"
+    },
+    {
+      "name": "correlation_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Correlation ID from original notification"
+    },
+    {
+      "name": "source_service",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Source service from original notification"
+    }
+  ]
+}
+

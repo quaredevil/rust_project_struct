@@ -1,0 +1,99 @@
+{
+  "type": "record",
+  "name": "NotificationFailed",
+  "namespace": "com.crypto.notifications.events",
+  "doc": "Event emitted when a notification fails after all retry attempts",
+  "fields": [
+    {
+      "name": "notification_id",
+      "type": "string",
+      "doc": "Unique notification identifier (UUID)"
+    },
+    {
+      "name": "channel",
+      "type": {
+        "type": "enum",
+        "name": "FailedChannel",
+        "symbols": ["TELEGRAM", "DISCORD", "EMAIL", "WEBHOOK"]
+      },
+      "doc": "Channel that failed to deliver"
+    },
+    {
+      "name": "priority",
+      "type": {
+        "type": "enum",
+        "name": "FailedPriority",
+        "symbols": ["LOW", "NORMAL", "HIGH", "CRITICAL"]
+      },
+      "doc": "Priority level of failed notification"
+    },
+    {
+      "name": "category",
+      "type": {
+        "type": "enum",
+        "name": "FailedCategory",
+        "symbols": ["ORDER", "POSITION", "SIGNAL", "ALERT", "REPORT", "SYSTEM"]
+      },
+      "doc": "Category of failed notification"
+    },
+    {
+      "name": "user_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "User ID if user-specific notification"
+    },
+    {
+      "name": "failed_at",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Timestamp when notification was marked as failed"
+    },
+    {
+      "name": "error_type",
+      "type": {
+        "type": "enum",
+        "name": "ErrorType",
+        "symbols": [
+          "CHANNEL_ERROR",
+          "RATE_LIMIT_EXCEEDED",
+          "VALIDATION_ERROR",
+          "NETWORK_ERROR",
+          "TIMEOUT",
+          "AUTHENTICATION_ERROR",
+          "INTERNAL_ERROR"
+        ]
+      },
+      "doc": "Type of error that caused failure"
+    },
+    {
+      "name": "error_message",
+      "type": "string",
+      "doc": "Detailed error message"
+    },
+    {
+      "name": "total_attempts",
+      "type": "int",
+      "doc": "Total number of delivery attempts made"
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "doc": "Original notification title for reference"
+    },
+    {
+      "name": "correlation_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Correlation ID from original notification"
+    },
+    {
+      "name": "source_service",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Source service from original notification"
+    }
+  ]
+}
+

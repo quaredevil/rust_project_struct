@@ -1502,3 +1502,1459 @@ references:
 # ════════════════════════════════════════════════════════════════
 # FIM DO PROJECT MAP
 # ════════════════════════════════════════════════════════════════
+
+
+---
+project:
+  name: crypto-webhook
+  version: "0.1.0"
+  language: Rust
+  edition: "2021"
+  architecture_style: "Hexagonal (Ports & Adapters)"
+  description: |
+    Production-ready webhook microservice for crypto trading ecosystem.
+    Receives webhooks from external sources (TradingView, Discord, Custom),
+    validates, normalizes, and publishes trading signals to Kafka.
+    
+    Part of a 5-service ecosystem:
+    1. crypto-webhook (THIS) - Receives and normalizes webhooks
+    2. crypto-trader - Executes trading orders
+    3. crypto-signals - Market analysis
+    4. crypto-notifications - Alert delivery
+    5. crypto-management - Configuration management
+
+  implementation_status:
+    overall_completion: "95%"
+    production_ready: true
+    phases_complete: "5/5"
+    total_files: 46
+    total_tests: "60+"
+    lines_of_code: "~5,700+"
+
+  features:
+    default: []
+    optional: []
+    implemented:
+      - "HTTP webhook endpoints (TradingView, Discord, Custom)"
+      - "HMAC SHA256 authentication"
+      - "Bearer token authentication"
+      - "JSON Schema validation"
+      - "Rate limiting (Redis-backed)"
+      - "Replay attack prevention (Redis-backed)"
+      - "Multiple webhook normalizers"
+      - "Avro binary serialization"
+      - "Kafka publishing with retry"
+      - "PostgreSQL audit trail"
+      - "Health checks"
+      - "Graceful shutdown"
+      - "Horizontal scaling support"
+
+  runtime: "Tokio async (full features)"
+  web_framework: "Axum 0.8.6"
+  database: "PostgreSQL with SQLx 0.8.6"
+  messaging: "Kafka (rdkafka 0.36) + Avro (apache-avro 0.16)"
+  schema_registry: "Schema Registry Converter 4.0"
+  cache: "Redis 0.24 (state persistence)"
+  observability: "tracing + tracing-subscriber (structured JSON logs)"
+  authentication: "HMAC SHA256 + Bearer Token"
+  validation: "JSON Schema (Draft 7)"
+
+  documentation:
+    location: "docs/"
+    implemented_files:
+      - "IMPLEMENTATION_COMPLETE.md - Executive summary of all features"
+      - "PHASE_2_2_SUMMARY.md - Redis State Persistence"
+      - "PHASE_2_3_SUMMARY.md - PostgreSQL Audit Trail"
+      - "PHASE_3_SUMMARY.md - Additional Features (HMAC, Normalizers, Schema, Retry)"
+      - "IMPLEMENTATION_REPORT_PHASE_2_1.md - Avro/Schema Registry integration"
+      - "IMPLEMENTATION_REPORT_PHASE_2_2.md - Redis implementation details"
+      - "IMPLEMENTATION_REPORT_PHASE_2_3.md - PostgreSQL implementation details"
+      - "MEMORY_CONTEXT.md - Project context and status"
+      - "SCHEMA_REGISTRY_INTEGRATION.md - Avro schema details"
+      - "KAFKA_MESSAGE_EXAMPLE.md - Example Kafka messages"
+      - "README.md - Project overview and setup"
+
+    conventions:
+      - "All technical documentation files must be placed in the docs/ folder"
+      - "Use descriptive uppercase names with underscores (e.g., FEATURE_GUIDE.md)"
+      - "Each significant feature, migration, or architectural decision should have its own .md file"
+      - "Include date and version information in documentation when relevant"
+      - "Migration guides should follow pattern: {FEATURE}_MIGRATION.md"
+      - "Architecture decision records should follow pattern: ADR_{NUMBER}_{TITLE}.md"
+      - "How-to guides should follow pattern: HOWTO_{TOPIC}.md"
+
+naming_style: snake_case
+
+application:
+  description: |
+    Application layer orchestrates webhook processing use cases, defines port contracts (traits),
+    and provides DTOs for cross-layer communication. Includes webhook normalizers for multiple
+    sources, schema validation, and service orchestration. This layer implements hexagonal
+    architecture ports pattern, defining interfaces that infrastructure adapters must implement.
+
+  naming_style: mixed
+
+  modules:
+    - name: ports
+      path: src/application/ports
+      purpose: |
+        Defines port trait contracts for hexagonal architecture. Infrastructure adapters
+        implement these traits to provide concrete functionality for external systems.
+
+      directories:
+        - path: ports/
+          purpose: "Port trait definitions for infrastructure adapters"
+          files:
+            - signal_publisher_port.rs
+            - rate_limiter_port.rs
+            - replay_detector_port.rs
+            - event_store.rs
+            - projection_store.rs
+            - mod.rs
+
+      key_types:
+        - name: SignalPublisherPort
+          kind: trait
+          purpose: "Publish trading signals to Kafka topics"
+        - name: RateLimiterPort
+          kind: trait
+          purpose: "Check and enforce rate limits per source"
+        - name: ReplayDetectorPort
+          kind: trait
+          purpose: "Detect and prevent replay attacks"
+        - name: EventStore
+          kind: trait
+          purpose: "Event store port for future event sourcing"
+        - name: ProjectionStore
+          kind: trait
+          purpose: "Projection store port for future CQRS"
+
+      dependencies:
+        internal:
+          - dtos
+        external:
+          - async-trait
+          - serde
+          - serde_json
+
+    - name: dtos
+      path: src/application/dtos
+      purpose: |
+        Data Transfer Objects for API contracts and layer boundaries. DTOs are AVRO-compliant
+        for Kafka serialization and use serde for JSON compatibility.
+
+      directories:
+        - path: dtos/
+          purpose: "DTO definitions for cross-layer communication"
+          files:
+            - signal_dto.rs
+            - tradingview_payload_dto.rs
+            - responses.rs
+            - mod.rs
+
+      key_types:
+        - name: SignalDTO
+          kind: struct
+          purpose: "AVRO-compliant trading signal DTO"
+        - name: TradingViewPayloadDTO
+          kind: struct
+          purpose: "TradingView webhook payload structure"
+        - name: WebhookResponse
+          kind: struct
+          purpose: "Successful webhook response"
+        - name: ErrorResponse
+          kind: struct
+          purpose: "Error response structure"
+        - name: HealthResponse
+          kind: struct
+          purpose: "Health check response"
+
+      dependencies:
+        internal: []
+        external:
+          - serde
+          - serde_json
+          - chrono
+          - uuid
+
+    - name: normalizers
+      path: src/application/normalizers
+      purpose: |
+        Webhook normalizers transform source-specific payloads into normalized SignalDTOs.
+        Implements plugin pattern via WebhookNormalizer trait for extensibility.
+
+      directories:
+        - path: normalizers/
+          purpose: "Source-specific webhook normalizers"
+          files:
+            - normalizer_trait.rs
+            - tradingview.rs
+            - discord.rs
+            - custom.rs
+            - mod.rs
+
+      key_types:
+        - name: WebhookNormalizer
+          kind: trait
+          purpose: "Normalizer contract for webhook sources"
+        - name: TradingViewNormalizer
+          kind: struct
+          purpose: "TradingView webhook normalizer"
+        - name: DiscordNormalizer
+          kind: struct
+          purpose: "Discord webhook normalizer"
+        - name: CustomNormalizer
+          kind: struct
+          purpose: "Custom format webhook normalizer"
+
+      dependencies:
+        internal:
+          - dtos
+        external:
+          - async-trait
+          - serde_json
+
+    - name: validation
+      path: src/application/validation
+      purpose: |
+        JSON Schema validation for incoming webhook payloads. Validates against predefined
+        Draft 7 schemas before normalization to ensure data integrity.
+
+      directories:
+        - path: validation/
+          purpose: "JSON Schema validation components"
+          files:
+            - schema_validator.rs
+            - mod.rs
+
+      key_types:
+        - name: SchemaValidator
+          kind: struct
+          purpose: "JSON Schema Draft 7 validator with schema registry"
+
+      dependencies:
+        internal: []
+        external:
+          - jsonschema
+          - serde_json
+          - tracing
+
+    - name: services
+      path: src/application/services
+      purpose: |
+        Application services orchestrate use case workflows. WebhookService coordinates
+        the entire webhook processing pipeline from validation to publishing.
+
+      directories:
+        - path: services/
+          purpose: "Application service orchestrators"
+          files:
+            - webhook_service.rs
+            - mod.rs
+
+      key_types:
+        - name: WebhookService
+          kind: struct
+          purpose: "End-to-end webhook processing orchestrator"
+
+      dependencies:
+        internal:
+          - ports
+          - dtos
+          - normalizers
+        external:
+          - tracing
+          - serde_json
+
+    - name: queries
+      path: src/application/queries
+      purpose: "Query handlers for read operations (CQRS pattern)"
+
+      directories:
+        - path: queries/
+          purpose: "Placeholder for future read model queries"
+          files:
+            - mod.rs
+
+      dependencies:
+        internal: []
+        external: []
+
+      notes:
+        - "📋 TODO: Implement query handlers when read models are needed"
+        - "🔄 Evolução: Part of future CQRS implementation"
+
+  conventions:
+    - "All ports are async traits with Send + Sync bounds"
+    - "Port methods return ApplicationResult<T> or InfraResult<T>"
+    - "DTOs use serde Serialize/Deserialize for JSON compatibility"
+    - "Normalizers return tuple (SignalDTO, String) where String is side (BUY/SELL)"
+    - "Schema validation occurs before normalization"
+    - "All async operations use tokio runtime"
+    - "Errors use thiserror for structured error types"
+    - "Tracing for observability in service layer"
+
+  interactions:
+    - from: services
+      to: ports
+      method: direct_call
+      description: "WebhookService calls port traits for infrastructure operations"
+    - from: services
+      to: normalizers
+      method: direct_call
+      description: "WebhookService delegates payload normalization to normalizers"
+    - from: normalizers
+      to: dtos
+      method: direct_call
+      description: "Normalizers construct and return SignalDTO instances"
+    - from: validation
+      to: dtos
+      method: direct_call
+      description: "SchemaValidator validates JSON payloads before DTO creation"
+
+  glossary_refs:
+    - term: Signal
+      usage: "SignalDTO struct in dtos/signal_dto.rs"
+      relevance: "Core domain concept representing normalized trading signal"
+    - term: Webhook
+      usage: "WebhookService, WebhookNormalizer, WebhookResponse"
+      relevance: "Entry point for external trading signals"
+    - term: Side
+      usage: "Normalizers return side (BUY/SELL) for Kafka topic routing"
+      relevance: "Determines which Kafka topic receives the signal"
+    - term: Source
+      usage: "SourceName enum used across normalizers and DTOs"
+      relevance: "Identifies webhook origin (TradingView, Discord, Custom)"
+
+domain:
+  description: |
+    Domain layer contains pure business logic for webhook processing and signal generation.
+    Includes entities (Signal, Webhook), value objects (SourceName, Symbol, WebhookId),
+    and repository interfaces. No infrastructure dependencies - maintains strict hexagonal
+    architecture boundaries with zero coupling to external frameworks or libraries.
+
+  naming_style: mixed
+
+  modules:
+    - name: entities
+      path: src/domain/entities
+      purpose: |
+        Domain entities with identity and business logic. Entities encapsulate behavior
+        and invariants related to trading signals and webhook lifecycle management.
+
+      directories:
+        - path: entities/
+          purpose: "Core domain entities with business logic"
+          files:
+            - signal.rs
+            - webhook.rs
+            - mod.rs
+
+      key_types:
+        - name: Signal
+          kind: struct
+          purpose: "Normalized trading signal entity with validation"
+        - name: Side
+          kind: enum
+          purpose: "Trading side (Buy/Sell) with Kafka topic routing"
+        - name: Webhook
+          kind: struct
+          purpose: "Webhook entity with status lifecycle"
+        - name: WebhookStatus
+          kind: enum
+          purpose: "Status states: Received, Validated, Normalized, Published, Rejected, Failed"
+        - name: SignalError
+          kind: enum
+          purpose: "Signal validation errors"
+
+      dependencies:
+        internal:
+          - value_objects
+        external:
+          - serde
+          - chrono
+          - thiserror
+
+    - name: value_objects
+      path: src/domain/value_objects
+      purpose: |
+        Immutable value objects with built-in validation. Enforce domain constraints
+        at the type level for symbols, source names, and identifiers.
+
+      directories:
+        - path: value_objects/
+          purpose: "Self-validating immutable value objects"
+          files:
+            - source_name.rs
+            - symbol.rs
+            - webhook_id.rs
+            - mod.rs
+
+      key_types:
+        - name: SourceName
+          kind: enum
+          purpose: "Webhook source identifier (TradingView, Discord, Custom, Generic)"
+        - name: Symbol
+          kind: struct
+          purpose: "Validated trading symbol (e.g., BTCUSDT)"
+        - name: WebhookId
+          kind: struct
+          purpose: "Unique webhook identifier (UUID wrapper)"
+        - name: SourceNameError
+          kind: enum
+          purpose: "Source name parsing errors"
+        - name: SymbolError
+          kind: enum
+          purpose: "Symbol validation errors"
+
+      dependencies:
+        internal: []
+        external:
+          - serde
+          - uuid
+          - thiserror
+
+    - name: repositories
+      path: src/domain/repositories
+      purpose: |
+        Repository trait interfaces defining persistence contracts. Infrastructure
+        layer provides concrete implementations for different storage backends.
+
+      directories:
+        - path: repositories/
+          purpose: "Repository interface definitions"
+          files:
+            - webhook_repository.rs
+            - mod.rs
+
+      key_types:
+        - name: WebhookRepository
+          kind: trait
+          purpose: "Webhook persistence contract for audit trail"
+
+      dependencies:
+        internal:
+          - entities
+        external:
+          - async-trait
+
+    - name: aggregates
+      path: src/domain/aggregates
+      purpose: "Domain aggregates (aggregate roots)"
+
+      directories:
+        - path: aggregates/
+          purpose: "Placeholder for future aggregate implementations"
+          files:
+            - mod.rs
+
+      dependencies:
+        internal: []
+        external: []
+
+      notes:
+        - "📋 TODO: Not required for current webhook processing domain"
+        - "🔄 Evolução: May add if complex multi-entity transactions emerge"
+
+    - name: events
+      path: src/domain/events
+      purpose: "Domain events for event sourcing"
+
+      directories:
+        - path: events/
+          purpose: "Placeholder for future domain events"
+          files:
+            - mod.rs
+
+      dependencies:
+        internal: []
+        external: []
+
+      notes:
+        - "📋 TODO: Placeholder for future event sourcing implementation"
+        - "🔄 Evolução: Will contain WebhookReceived, SignalNormalized events"
+
+    - name: services
+      path: src/domain/services
+      purpose: "Domain services for complex business logic"
+
+      directories:
+        - path: services/
+          purpose: "Placeholder for domain-specific services"
+          files:
+            - mod.rs
+
+      dependencies:
+        internal: []
+        external: []
+
+      notes:
+        - "📋 TODO: Currently business logic resides in entities"
+        - "🔄 Evolução: Add if multi-entity orchestration needed"
+
+  conventions:
+    - "Domain layer has zero infrastructure dependencies"
+    - "Use thiserror for domain error definitions"
+    - "Entities contain business logic and invariants"
+    - "Value objects are immutable and self-validating"
+    - "Side enum (Buy/Sell) determines Kafka topic routing"
+    - "All types implement serde for serialization"
+    - "Repository traits are async with Send + Sync"
+    - "No direct dependency on application or infrastructure layers"
+
+  interactions:
+    - from: entities
+      to: value_objects
+      method: direct_call
+      description: "Entities use value objects for type-safe domain concepts"
+
+  glossary_refs:
+    - term: Signal
+      usage: "Signal struct in entities/signal.rs"
+      relevance: "Core domain entity representing trading signal with validation"
+    - term: Side
+      usage: "Side enum in entities/signal.rs - Buy or Sell variants"
+      relevance: "Determines Kafka topic routing (signals.buy vs signals.sell)"
+    - term: Webhook
+      usage: "Webhook struct in entities/webhook.rs"
+      relevance: "Represents external webhook with lifecycle management"
+    - term: Symbol
+      usage: "Symbol value object for trading pairs"
+      relevance: "Validated trading symbol like BTCUSDT, ETHUSDT"
+    - term: SourceName
+      usage: "SourceName enum for webhook origins"
+      relevance: "Identifies webhook source: TradingView, Discord, Custom, Generic"
+    - term: WebhookStatus
+      usage: "WebhookStatus enum tracking processing state"
+      relevance: "Status lifecycle: Received → Validated → Normalized → Published"
+
+infrastructure:
+  description: |
+    Infrastructure layer implements adapters for external systems (Kafka, PostgreSQL, Redis, HTTP).
+    Contains all I/O and framework-specific code. Provides authentication, rate limiting, replay
+    prevention, retry policies, bootstrap, startup, and shutdown modules for complete application
+    lifecycle management. All adapters implement application layer port traits.
+
+  naming_style: mixed
+
+  modules:
+    - name: authentication
+      path: src/infrastructure/authentication
+      purpose: "HMAC SHA256 authentication for webhook verification"
+
+      directories:
+        - path: authentication/
+          purpose: "Authentication implementations"
+          files:
+            - hmac_authenticator.rs
+            - mod.rs
+
+      key_types:
+        - name: HmacAuthenticator
+          kind: struct
+          purpose: "HMAC signature verification with per-source secrets"
+
+      dependencies:
+        internal: []
+        external:
+          - hmac
+          - sha2
+          - hex
+          - tracing
+
+      notes:
+        - "✅ Created in Phase 3"
+        - "🏗️ Arquitetura: Supports per-source HMAC secrets configuration"
+
+    - name: messaging
+      path: src/infrastructure/messaging
+      purpose: "Kafka infrastructure with Avro and JSON serialization"
+
+      directories:
+        - path: messaging/
+          purpose: "Kafka publishers and configuration"
+          files:
+            - kafka_signal_publisher.rs
+            - avro_signal_publisher.rs
+            - mod.rs
+        - path: messaging/kafka/
+          purpose: "Kafka base components"
+          files:
+            - common.rs
+            - config.rs
+            - mod.rs
+        - path: messaging/kafka/producers/
+          purpose: "Producer implementations"
+          files:
+            - base_producer.rs
+            - batching_producer.rs
+            - mod.rs
+        - path: messaging/kafka/consumers/
+          purpose: "Consumer implementations (unused in this service)"
+          files:
+            - base_consumer.rs
+            - mod.rs
+
+      key_types:
+        - name: KafkaSignalPublisher
+          kind: struct
+          purpose: "JSON Kafka publisher (Phase 1)"
+        - name: AvroSignalPublisher
+          kind: struct
+          purpose: "Avro binary Kafka publisher with Schema Registry (Phase 2.1)"
+        - name: BaseProducer
+          kind: struct
+          purpose: "Base Kafka producer configuration"
+        - name: BatchingProducer
+          kind: struct
+          purpose: "Batching Kafka producer for high throughput"
+
+      dependencies:
+        internal:
+          - ports
+          - dtos
+        external:
+          - rdkafka
+          - apache-avro
+          - schema_registry_converter
+          - serde_json
+          - tracing
+
+      notes:
+        - "✅ Avro publisher provides 42% size reduction vs JSON"
+        - "🏗️ Arquitetura: Implements SignalPublisherPort trait"
+
+    - name: rate_limiting
+      path: src/infrastructure/rate_limiting
+      purpose: "Rate limiting implementations with Redis and in-memory backends"
+
+      directories:
+        - path: rate_limiting/
+          purpose: "Rate limiter adapters"
+          files:
+            - in_memory_rate_limiter.rs
+            - redis_rate_limiter.rs
+            - mod.rs
+
+      key_types:
+        - name: InMemoryRateLimiter
+          kind: struct
+          purpose: "In-memory rate limiter for development"
+        - name: RedisRateLimiter
+          kind: struct
+          purpose: "Redis-backed rate limiter with token bucket (Phase 2.2)"
+
+      dependencies:
+        internal:
+          - ports
+        external:
+          - redis
+          - parking_lot
+          - tracing
+
+      notes:
+        - "✅ Redis version enables horizontal scaling"
+        - "🏗️ Arquitetura: Implements RateLimiterPort trait"
+
+    - name: replay_prevention
+      path: src/infrastructure/replay_prevention
+      purpose: "Replay attack detection implementations"
+
+      directories:
+        - path: replay_prevention/
+          purpose: "Replay detector adapters"
+          files:
+            - in_memory_replay_detector.rs
+            - redis_replay_detector.rs
+            - mod.rs
+
+      key_types:
+        - name: InMemoryReplayDetector
+          kind: struct
+          purpose: "In-memory replay detector for development"
+        - name: RedisReplayDetector
+          kind: struct
+          purpose: "Redis-backed replay detector with Lua script (Phase 2.2)"
+
+      dependencies:
+        internal:
+          - ports
+        external:
+          - redis
+          - parking_lot
+          - tracing
+
+      notes:
+        - "✅ Uses atomic Lua script for check-and-mark operation"
+        - "🏗️ Arquitetura: Implements ReplayDetectorPort trait"
+
+    - name: repositories
+      path: src/infrastructure/repositories
+      purpose: "Repository implementations for data persistence"
+
+      directories:
+        - path: repositories/
+          purpose: "PostgreSQL repository implementations"
+          files:
+            - base_repository.rs
+            - postgres_webhook_repository.rs
+            - mod.rs
+
+      key_types:
+        - name: Repository
+          kind: trait
+          purpose: "Generic repository trait"
+        - name: PostgresRepository
+          kind: struct
+          purpose: "Generic PostgreSQL repository base"
+        - name: PostgresWebhookRepository
+          kind: struct
+          purpose: "PostgreSQL webhook audit trail (Phase 2.3)"
+
+      dependencies:
+        internal:
+          - repositories
+        external:
+          - sqlx
+          - serde_json
+          - chrono
+          - tracing
+
+      notes:
+        - "✅ Created in Phase 2.3"
+        - "🏗️ Arquitetura: Implements WebhookRepository trait from domain"
+
+    - name: retry
+      path: src/infrastructure/retry
+      purpose: "Retry policies with exponential backoff"
+
+      directories:
+        - path: retry/
+          purpose: "Retry policy implementations"
+          files:
+            - retry_policy.rs
+            - mod.rs
+
+      key_types:
+        - name: RetryPolicy
+          kind: struct
+          purpose: "Configurable retry policy with exponential backoff"
+
+      dependencies:
+        internal: []
+        external:
+          - tokio
+          - tracing
+
+      notes:
+        - "✅ Created in Phase 3"
+        - "🏗️ Arquitetura: Used by publishers and repositories"
+
+    - name: bootstrap
+      path: src/infrastructure/bootstrap
+      purpose: "Component initialization with retry logic and fallbacks"
+
+      directories:
+        - path: bootstrap/
+          purpose: "Bootstrap and initialization logic"
+          files:
+            - database.rs
+            - mod.rs
+
+      key_types:
+        - name: DatabaseBootstrap
+          kind: struct
+          purpose: "PostgreSQL connection bootstrapping with retry"
+
+      dependencies:
+        internal:
+          - retry
+        external:
+          - sqlx
+          - tracing
+
+      notes:
+        - "🏗️ Arquitetura: Handles graceful degradation on startup failures"
+
+    - name: startup
+      path: src/infrastructure/startup
+      purpose: "Application startup configuration and logging"
+
+      directories:
+        - path: startup/
+          purpose: "Startup initialization modules"
+          files:
+            - logging.rs
+            - banner.rs
+            - health.rs
+            - mod.rs
+
+      key_types:
+        - name: LoggingSetup
+          kind: struct
+          purpose: "Structured logging initialization"
+        - name: StartupBanner
+          kind: struct
+          purpose: "Startup banner display with component status"
+        - name: ComponentHealth
+          kind: enum
+          purpose: "Component health status"
+        - name: HealthSummary
+          kind: struct
+          purpose: "Overall health summary"
+
+      dependencies:
+        internal: []
+        external:
+          - tracing
+          - tracing-subscriber
+
+      notes:
+        - "🏗️ Arquitetura: Provides structured JSON logging for production"
+
+    - name: shutdown
+      path: src/infrastructure/shutdown
+      purpose: "Graceful shutdown coordination"
+
+      directories:
+        - path: shutdown/
+          purpose: "Shutdown handling modules"
+          files:
+            - signal_handler.rs
+            - graceful.rs
+            - mod.rs
+
+      key_types:
+        - name: SignalHandler
+          kind: struct
+          purpose: "OS signal handling (SIGTERM, SIGINT)"
+        - name: GracefulShutdown
+          kind: struct
+          purpose: "Coordinated graceful shutdown"
+
+      dependencies:
+        internal: []
+        external:
+          - tokio
+          - tracing
+
+      notes:
+        - "🏗️ Arquitetura: Ensures clean shutdown of all components"
+
+    - name: config
+      path: src/infrastructure/config
+      purpose: "Configuration management with environment support"
+
+      directories:
+        - path: config/
+          purpose: "Application configuration"
+          files:
+            - settings.rs
+            - mod.rs
+
+      key_types:
+        - name: Settings
+          kind: struct
+          purpose: "Application settings with environment variable support"
+
+      dependencies:
+        internal: []
+        external:
+          - config
+          - dotenvy
+          - serde
+
+      notes:
+        - "🏗️ Arquitetura: Supports multiple configuration sources (env, file, defaults)"
+
+    - name: event_store
+      path: src/infrastructure/event_store
+      purpose: "Event store implementations"
+
+      directories:
+        - path: event_store/
+          purpose: "Event store adapters"
+          files:
+            - in_memory_event_store.rs
+            - mod.rs
+
+      key_types:
+        - name: InMemoryEventStore
+          kind: struct
+          purpose: "In-memory event store for testing"
+
+      dependencies:
+        internal:
+          - ports
+        external:
+          - parking_lot
+
+      notes:
+        - "📋 TODO: Implement PostgreSQL event store for production"
+        - "🔄 Evolução: Part of future event sourcing implementation"
+
+  conventions:
+    - "All infrastructure types implement application ports (traits)"
+    - "Use Arc<Self> for shared ownership across async tasks"
+    - "Graceful shutdown hooks via shutdown() method on ports"
+    - "Health checks return InfraResult for readiness probes"
+    - "ConnectionManager for Redis with automatic reconnection"
+    - "Lua scripts for atomic Redis operations"
+    - "Retry policies handle transient failures with exponential backoff"
+    - "HMAC secrets configured per source"
+
+  interactions:
+    - from: messaging
+      to: kafka
+      method: kafka
+      description: "Publishes Avro/JSON signals to Kafka topics (signals.buy, signals.sell)"
+    - from: repositories
+      to: database
+      method: db
+      description: "Persists webhook audit trail to PostgreSQL"
+    - from: rate_limiting
+      to: cache
+      method: cache
+      description: "Stores rate limit counters in Redis with expiration"
+    - from: replay_prevention
+      to: cache
+      method: cache
+      description: "Stores request signatures in Redis for replay detection"
+    - from: bootstrap
+      to: retry
+      method: direct_call
+      description: "Uses retry policy for component initialization"
+
+  glossary_refs:
+    - term: Avro
+      usage: "AvroSignalPublisher serializes signals to Apache Avro binary format"
+      relevance: "42% smaller messages, schema evolution support"
+    - term: HMAC
+      usage: "HmacAuthenticator validates webhook signatures"
+      relevance: "Ensures webhooks are from trusted sources"
+    - term: Redis
+      usage: "RedisRateLimiter, RedisReplayDetector for stateful operations"
+      relevance: "Enables horizontal scaling with shared state"
+    - term: Kafka
+      usage: "All signal publishers send to Kafka topics"
+      relevance: "Decouples webhook ingestion from downstream processing"
+
+presentation:
+  description: |
+    Presentation layer handles HTTP endpoints, routing, middleware, and request/response
+    handling. Built with Axum web framework. Includes webhook handlers, health checks,
+    and HMAC validation middleware for authentication.
+
+  naming_style: snake_case
+
+  modules:
+    - name: handlers
+      path: src/presentation/http/handlers
+      purpose: "HTTP request handlers for webhook endpoints and health checks"
+
+      directories:
+        - path: handlers/
+          purpose: "HTTP endpoint handlers"
+          files:
+            - tradingview_handler.rs
+            - mod.rs
+
+      key_types:
+        - name: AppState
+          kind: struct
+          purpose: "Shared application state for dependency injection"
+        - name: handle_tradingview_webhook
+          kind: function
+          purpose: "POST /webhook/tradingview handler"
+        - name: handle_health_check
+          kind: function
+          purpose: "GET /health handler"
+
+      dependencies:
+        internal:
+          - services
+          - dtos
+          - normalizers
+        external:
+          - axum
+          - serde_json
+          - tracing
+
+      notes:
+        - "🔄 Evolução: Add Discord and Custom webhook handlers when needed"
+
+    - name: middleware
+      path: src/presentation/http/middleware
+      purpose: "HTTP middleware for cross-cutting concerns"
+
+      directories:
+        - path: middleware/
+          purpose: "Axum middleware components"
+          files:
+            - hmac_middleware.rs
+            - mod.rs
+
+      key_types:
+        - name: HmacMiddlewareState
+          kind: struct
+          purpose: "HMAC middleware configuration state"
+        - name: hmac_validation_middleware
+          kind: function
+          purpose: "HMAC signature validation middleware"
+
+      dependencies:
+        internal:
+          - authentication
+        external:
+          - axum
+          - tracing
+
+      notes:
+        - "✅ Created in Phase 3"
+        - "🏗️ Arquitetura: Validates HMAC before handler execution"
+
+    - name: router
+      path: src/presentation/http
+      purpose: "Axum router configuration with all endpoint definitions"
+
+      directories:
+        - path: http/
+          purpose: "HTTP layer root with router"
+          files:
+            - router.rs
+            - mod.rs
+
+      key_types:
+        - name: create_router
+          kind: function
+          purpose: "Creates configured Axum router with all routes"
+
+      dependencies:
+        internal:
+          - handlers
+          - middleware
+        external:
+          - axum
+
+      notes:
+        - "🏗️ Arquitetura: Single router creation function for all endpoints"
+
+  conventions:
+    - "Handlers are async functions compatible with Axum"
+    - "Use State<Arc<AppState>> for dependency injection"
+    - "Middleware validates before handler execution"
+    - "Return proper HTTP status codes (200, 400, 401, 500)"
+    - "Extract Bearer token and HMAC signature from headers"
+    - "Use Json<T> for request/response bodies"
+    - "Structured error responses with ErrorResponse DTO"
+
+  interactions:
+    - from: handlers
+      to: services
+      method: direct_call
+      description: "Handlers call WebhookService to process webhooks"
+    - from: middleware
+      to: authentication
+      method: direct_call
+      description: "HMAC middleware validates signatures via HmacAuthenticator"
+    - from: router
+      to: handlers
+      method: direct_call
+      description: "Router maps HTTP paths to handler functions"
+
+  glossary_refs:
+    - term: Webhook
+      usage: "Handlers process incoming webhook HTTP requests"
+      relevance: "Entry point for external trading signals via HTTP"
+    - term: HMAC
+      usage: "Middleware validates HMAC signatures in headers"
+      relevance: "Ensures request authenticity and integrity"
+
+shared:
+  description: |
+    Shared layer contains cross-cutting utilities and types used across all layers.
+    Includes error types, common traits, utility functions for datetime, validation,
+    and shared type aliases. This layer has no business logic and serves as a
+    foundation for domain, application, and infrastructure layers.
+
+  naming_style: snake_case
+
+  modules:
+    - name: errors
+      path: src/shared
+      purpose: "Structured error types using thiserror for all layers"
+
+      directories:
+        - path: shared/
+          purpose: "Shared error definitions"
+          files:
+            - errors.rs
+
+      key_types:
+        - name: DomainError
+          kind: enum
+          purpose: "Domain-level errors (Validation, NotFound, Concurrency, DatabaseError)"
+        - name: ApplicationError
+          kind: enum
+          purpose: "Application-level errors (includes Domain, Infrastructure, ValidationError, AuthenticationFailed, RateLimitExceeded, ReplayDetected)"
+        - name: InfrastructureError
+          kind: enum
+          purpose: "Infrastructure-level errors (Database, Kafka, Redis, Serialization, Connection)"
+        - name: DomainResult
+          kind: type
+          purpose: "Type alias for Result<T, DomainError>"
+        - name: ApplicationResult
+          kind: type
+          purpose: "Type alias for Result<T, ApplicationError>"
+        - name: InfraResult
+          kind: type
+          purpose: "Type alias for Result<T, InfrastructureError>"
+
+      dependencies:
+        internal: []
+        external:
+          - thiserror
+
+      notes:
+        - "🏗️ Arquitetura: Three-tier error hierarchy matches layer separation"
+        - "🏗️ Arquitetura: ApplicationError wraps both Domain and Infrastructure errors"
+
+    - name: types
+      path: src/shared
+      purpose: "Common type aliases and shared type definitions"
+
+      directories:
+        - path: shared/
+          purpose: "Shared type definitions"
+          files:
+            - types.rs
+
+      dependencies:
+        internal: []
+        external:
+          - serde
+
+      notes:
+        - "📋 TODO: Currently minimal, expand as needed"
+
+    - name: utils
+      path: src/shared/utils
+      purpose: "Utility functions for datetime and validation"
+
+      directories:
+        - path: utils/
+          purpose: "Utility function modules"
+          files:
+            - datetime.rs
+            - validation.rs
+            - mod.rs
+
+      key_types:
+        - name: datetime
+          kind: module
+          purpose: "DateTime utility functions (now, parsing, formatting)"
+        - name: validation
+          kind: module
+          purpose: "Validation utility functions (email, url, etc.)"
+
+      dependencies:
+        internal: []
+        external:
+          - chrono
+
+      notes:
+        - "🏗️ Arquitetura: Pure utility functions, no state"
+
+    - name: traits
+      path: src/shared/traits
+      purpose: "Shared traits used across multiple layers"
+
+      directories:
+        - path: traits/
+          purpose: "Common trait definitions"
+          files:
+            - mod.rs
+
+      dependencies:
+        internal: []
+        external: []
+
+      notes:
+        - "📋 TODO: Placeholder for future shared traits"
+        - "🔄 Evolução: May add common traits like ToJson, FromJson, etc."
+
+  conventions:
+    - "Error types use thiserror for derive macros"
+    - "Result type aliases (DomainResult, ApplicationResult, InfraResult)"
+    - "Error conversion using From trait (DomainError → ApplicationError)"
+    - "Utility functions are pure and stateless"
+    - "No business logic in shared layer"
+    - "Keep dependencies minimal"
+
+  interactions:
+    - from: errors
+      to: all_layers
+      method: direct_call
+      description: "All layers use error types for error handling"
+
+  glossary_refs:
+    - term: Error
+      usage: "Three-tier error hierarchy: Domain, Application, Infrastructure"
+      relevance: "Structured error handling matching architectural layers"
+
+database:
+  migrations:
+    location: "migrations/"
+    tool: "SQLx or Flyway"
+    implemented: true
+
+    files:
+      - V001__create_webhooks_table.sql: |
+          Creates webhooks table for audit trail with:
+          - 11 columns (id, source, payload, status, timestamps, etc.)
+          - 6 optimized indexes (single, composite, partial, GIN)
+          - JSONB for flexible payload storage
+          - Full audit trail capabilities
+
+  schemas:
+    location: "schemas/"
+    format: "Apache Avro (.avsc)"
+    implemented: true
+
+    files:
+      - signal_buy.avsc: "Avro schema for BUY signals"
+      - signal_sell.avsc: "Avro schema for SELL signals"
+
+    note: "Signals are routed to different Kafka topics based on Side (Buy → signals.buy, Sell → signals.sell)"
+
+dependencies:
+  production:
+    - tokio: "1.x (async runtime with full features)"
+    - axum: "0.8.6 (web framework)"
+    - serde: "1.x (serialization)"
+    - serde_json: "1.x (JSON support)"
+    - sqlx: "0.8.6 (PostgreSQL driver)"
+    - uuid: "1.x (UUID generation)"
+    - chrono: "0.4 (datetime handling)"
+    - thiserror: "1.x (error handling)"
+    - anyhow: "1.x (error context)"
+    - config: "0.14 (configuration)"
+    - dotenvy: "0.15 (environment variables)"
+    - tracing: "0.1 (logging)"
+    - tracing-subscriber: "0.3 (log formatting)"
+    - async-trait: "0.1 (async traits)"
+    - once_cell: "1.x (lazy statics)"
+    - parking_lot: "0.12 (fast mutex)"
+    - rdkafka: "0.36 (Kafka client)"
+    - apache-avro: "0.16 (Avro serialization)"
+    - schema_registry_converter: "4.0 (Schema Registry)"
+    - redis: "0.24 (Redis client with connection-manager)"
+    - hmac: "0.12 (HMAC authentication)"
+    - sha2: "0.10 (SHA256 hashing)"
+    - hex: "0.4 (hex encoding/decoding)"
+    - jsonschema: "0.17 (JSON Schema validation)"
+    - reqwest: "0.12 (HTTP client)"
+
+  development:
+    - mockall: "0.12 (mocking)"
+    - tokio-test: "0.4 (tokio testing utilities)"
+
+best_practices:
+  - category: architecture
+    items:
+      - "Hexagonal architecture with clear port/adapter separation"
+      - "Domain layer has zero infrastructure dependencies"
+      - "Application layer defines contracts via traits"
+      - "Infrastructure layer implements adapters"
+    priority: high
+
+  - category: security
+    items:
+      - "HMAC SHA256 signature validation for webhooks"
+      - "Bearer token authentication"
+      - "Rate limiting per source (Redis-backed)"
+      - "Replay attack prevention (Redis-backed)"
+      - "JSON Schema validation before processing"
+    priority: critical
+
+  - category: reliability
+    items:
+      - "Retry policies with exponential backoff"
+      - "Health check endpoints"
+      - "Graceful shutdown with signal handling"
+      - "Connection pooling for Redis and PostgreSQL"
+      - "Automatic reconnection for Redis"
+    priority: high
+
+  - category: observability
+    items:
+      - "Structured logging with tracing"
+      - "Comprehensive error messages"
+      - "Request/response logging"
+      - "Retry attempt tracking"
+    priority: high
+
+  - category: data_integrity
+    items:
+      - "PostgreSQL audit trail for all webhooks"
+      - "Status lifecycle tracking"
+      - "Error message preservation"
+      - "JSONB for flexible payload queries"
+    priority: high
+
+  - category: performance
+    items:
+      - "Avro binary serialization (42% smaller than JSON)"
+      - "Redis for fast state lookups"
+      - "Database indexes for common queries"
+      - "Connection pooling"
+      - "Async/await throughout"
+    priority: medium
+
+  - category: scalability
+    items:
+      - "Horizontal scaling support (shared Redis state)"
+      - "Multiple Kafka topics"
+      - "Load balancer friendly"
+      - "Stateless application logic"
+    priority: high
+
+quality:
+  test_coverage: "60+ tests (100% passing)"
+  unit_tests:
+    - "Domain entity tests (8 tests)"
+    - "Application normalizer tests (14 tests)"
+    - "Infrastructure tests (38+ tests)"
+    - "HMAC authentication tests (3 tests)"
+    - "Schema validation tests (4 tests)"
+    - "Retry policy tests (4 tests)"
+
+  integration_tests:
+    - "Redis tests (13 tests - ignored without Redis)"
+    - "PostgreSQL tests (1 test - ignored without DB)"
+
+  test_strategy:
+    - "Unit tests for business logic"
+    - "Integration tests require external services"
+    - "Use #[ignore] for tests requiring infrastructure"
+    - "Mock external dependencies where appropriate"
+
+  code_metrics:
+    cyclomatic_complexity: "low-medium"
+    coupling: "low (hexagonal architecture)"
+    cohesion: "high (single responsibility)"
+    lines_of_code: "~5,700+"
+    files: 46
+
+  build_status:
+    compilation_errors: 0
+    warnings: "minimal"
+    release_build: "✅ SUCCESS"
+    production_ready: true
+
+inter_service_communication:
+  implemented: true
+  protocol: "Kafka (async event-driven)"
+
+  published_topics:
+    - name: "signals.buy"
+      format: "Avro binary"
+      schema: "schemas/crypto_trading_signal_buy.avsc"
+      description: "BUY trading signals"
+
+    - name: "signals.sell"
+      format: "Avro binary"
+      schema: "schemas/crypto_trading_signal_sell.avsc"
+      description: "SELL trading signals"
+
+  consumed_topics:
+    - note: "crypto-webhook is a webhook receiver/publisher only, does not consume Kafka topics"
+
+  downstream_services:
+    - service: "crypto-trader"
+      consumes: "signals.buy, signals.sell"
+      purpose: "Executes trading orders based on signals"
+
+    - service: "crypto-signals"
+      consumes: "signals.buy, signals.sell (optional)"
+      purpose: "May use for backtesting or analysis"
+
+    - service: "crypto-notifications"
+      consumes: "signals.buy, signals.sell (optional)"
+      purpose: "May send notifications on signals"
+
+deployment:
+  containerization: "Docker"
+  orchestration: "Docker Compose (dev), Kubernetes (prod)"
+
+  required_services:
+    - PostgreSQL: "Database for audit trail"
+    - Redis: "State persistence (rate limiting, replay detection)"
+    - Kafka: "Message broker"
+    - Schema Registry: "Avro schema management"
+
+  environment_variables:
+    - HOST: "HTTP server host (default: 0.0.0.0)"
+    - PORT: "HTTP server port (default: 8080)"
+    - BEARER_TOKEN: "Bearer token for authentication"
+    - REDIS_URL: "Redis connection string"
+    - DATABASE_URL: "PostgreSQL connection string"
+    - KAFKA_BROKERS: "Kafka broker addresses"
+    - SCHEMA_REGISTRY_URL: "Schema Registry URL"
+    - KAFKA_TOPIC_BUY: "Topic for buy signals (default: signals.buy)"
+    - KAFKA_TOPIC_SELL: "Topic for sell signals (default: signals.sell)"
+    - RUST_LOG: "Log level (default: info)"
+
+  health_checks:
+    - endpoint: "/health"
+      method: "GET"
+      returns: "200 OK with health status JSON"
+
+  scaling:
+    horizontal: "✅ Supported (shared Redis state)"
+    vertical: "✅ Supported (async I/O efficient)"
+    load_balancing: "Any strategy (round-robin, least-conn, etc.)"
+
+endpoints:
+  - path: "/health"
+    method: "GET"
+    auth: "None"
+    purpose: "Health check"
+
+  - path: "/webhook/tradingview"
+    method: "POST"
+    auth: "Bearer token OR HMAC"
+    purpose: "Receive TradingView webhooks"
+    normalizer: "TradingViewNormalizer"
+
+  - path: "/webhook/discord"
+    method: "POST"
+    auth: "Bearer token OR HMAC"
+    purpose: "Receive Discord webhooks (future)"
+    normalizer: "DiscordNormalizer"
+    status: "Implemented but not routed"
+
+  - path: "/webhook/custom"
+    method: "POST"
+    auth: "Bearer token OR HMAC"
+    purpose: "Receive custom format webhooks (future)"
+    normalizer: "CustomNormalizer"
+    status: "Implemented but not routed"
+
+_metadata:
+  last_updated: "2025-11-28T00:00:00Z"
+  template_version: v3.0
+  updated_layers:
+    - application
+    - domain
+    - infrastructure
+    - presentation
+    - shared
+  total_modules: 28
+  coverage:
+    application_modules: 6
+    domain_modules: 6
+    infrastructure_modules: 11
+    presentation_modules: 3
+    shared_modules: 4
+

@@ -1,0 +1,76 @@
+{
+  "type": "record",
+  "name": "NotificationThrottled",
+  "namespace": "com.crypto.notifications.events",
+  "doc": "Event emitted when a notification is throttled due to rate limiting",
+  "fields": [
+    {
+      "name": "notification_id",
+      "type": "string",
+      "doc": "Unique notification identifier (UUID)"
+    },
+    {
+      "name": "channel",
+      "type": {
+        "type": "enum",
+        "name": "ThrottledChannel",
+        "symbols": ["TELEGRAM", "DISCORD", "EMAIL", "WEBHOOK"]
+      },
+      "doc": "Channel that was throttled"
+    },
+    {
+      "name": "priority",
+      "type": {
+        "type": "enum",
+        "name": "ThrottledPriority",
+        "symbols": ["LOW", "NORMAL", "HIGH", "CRITICAL"]
+      },
+      "doc": "Priority level of throttled notification"
+    },
+    {
+      "name": "category",
+      "type": {
+        "type": "enum",
+        "name": "ThrottledCategory",
+        "symbols": ["ORDER", "POSITION", "SIGNAL", "ALERT", "REPORT", "SYSTEM"]
+      },
+      "doc": "Category of throttled notification"
+    },
+    {
+      "name": "user_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "User ID if user-specific notification"
+    },
+    {
+      "name": "throttled_at",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Timestamp when notification was throttled"
+    },
+    {
+      "name": "retry_after_seconds",
+      "type": "long",
+      "doc": "Seconds to wait before retry"
+    },
+    {
+      "name": "rate_limit",
+      "type": "int",
+      "doc": "Rate limit that was exceeded (messages per window)"
+    },
+    {
+      "name": "current_count",
+      "type": "int",
+      "doc": "Current message count in the window"
+    },
+    {
+      "name": "correlation_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Correlation ID from original notification"
+    }
+  ]
+}
+

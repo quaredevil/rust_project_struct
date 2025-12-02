@@ -1,0 +1,80 @@
+{
+  "type": "record",
+  "name": "NotificationMessage",
+  "namespace": "com.crypto.notifications",
+  "doc": "Schema for notification messages sent via Kafka to the crypto-notifications service",
+  "fields": [
+    {
+      "name": "channel",
+      "type": {
+        "type": "enum",
+        "name": "NotificationChannel",
+        "symbols": ["TELEGRAM", "DISCORD", "EMAIL", "WEBHOOK", "ALL"]
+      },
+      "doc": "Target notification channel"
+    },
+    {
+      "name": "priority",
+      "type": {
+        "type": "enum",
+        "name": "NotificationPriority",
+        "symbols": ["LOW", "NORMAL", "HIGH", "CRITICAL"]
+      },
+      "doc": "Message priority level (affects rate limiting and formatting)"
+    },
+    {
+      "name": "category",
+      "type": {
+        "type": "enum",
+        "name": "NotificationCategory",
+        "symbols": ["ORDER", "POSITION", "SIGNAL", "ALERT", "REPORT", "SYSTEM"]
+      },
+      "doc": "Notification category for semantic grouping and emoji selection"
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "doc": "Notification title (max 200 characters)"
+    },
+    {
+      "name": "message",
+      "type": "string",
+      "doc": "Notification body/content (max 4000 characters)"
+    },
+    {
+      "name": "data",
+      "type": ["null", {
+        "type": "map",
+        "values": "string"
+      }],
+      "default": null,
+      "doc": "Optional structured data as key-value pairs (displayed as formatted list)"
+    },
+    {
+      "name": "user_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Optional user identifier for user-specific rate limiting"
+    },
+    {
+      "name": "timestamp",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Event timestamp in milliseconds since epoch (UTC)"
+    },
+    {
+      "name": "correlation_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Optional correlation ID for distributed tracing"
+    },
+    {
+      "name": "source_service",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Optional source service name (e.g., 'crypto-trader', 'crypto-signals')"
+    }
+  ]
+}
