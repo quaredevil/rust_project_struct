@@ -1,0 +1,58 @@
+{
+  "type": "record",
+  "name": "RiskControl",
+  "namespace": "com.crypto.trading.management",
+  "doc": "Risk parameter updates from crypto-management",
+  "fields": [
+    {
+      "name": "control_id",
+      "type": "string",
+      "doc": "Unique control message identifier"
+    },
+    {
+      "name": "action",
+      "type": {
+        "type": "enum",
+        "name": "RiskAction",
+        "symbols": ["UPDATE_LIMITS", "HALT_TRADING", "RESUME_TRADING"]
+      },
+      "doc": "Risk control action"
+    },
+    {
+      "name": "max_exposure_per_asset",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Maximum exposure per asset"
+    },
+    {
+      "name": "max_total_exposure",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Maximum total portfolio exposure"
+    },
+    {
+      "name": "max_daily_loss",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Maximum daily loss limit"
+    },
+    {
+      "name": "max_drawdown",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Maximum drawdown percentage"
+    },
+    {
+      "name": "reason",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Reason for the control action"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Control message timestamp"
+    }
+  ]
+}

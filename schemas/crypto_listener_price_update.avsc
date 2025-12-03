@@ -1,0 +1,29 @@
+{
+  "type": "record",
+  "name": "PriceUpdate",
+  "namespace": "com.crypto.listener.events",
+  "doc": "Market price update event",
+  "fields": [
+    {
+      "name": "symbol",
+      "type": "string",
+      "doc": "Trading pair symbol (e.g., BTCUSDT)"
+    },
+    {
+      "name": "price",
+      "type": "double",
+      "doc": "Current price"
+    },
+    {
+      "name": "quantity",
+      "type": "double",
+      "doc": "Trade quantity/volume"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "doc": "Unix timestamp in milliseconds"
+    }
+  ]
+}
+

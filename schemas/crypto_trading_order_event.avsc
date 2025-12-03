@@ -1,0 +1,141 @@
+{
+  "type": "record",
+  "name": "OrderEvent",
+  "namespace": "com.crypto.trading.orders",
+  "doc": "Order execution event published by crypto-trader",
+  "fields": [
+    {
+      "name": "event_id",
+      "type": "string",
+      "doc": "Unique event identifier"
+    },
+    {
+      "name": "event_type",
+      "type": {
+        "type": "enum",
+        "name": "OrderEventType",
+        "symbols": ["CREATED", "FILLED", "PARTIAL_FILL", "CANCELLED", "REJECTED", "EXPIRED", "STOP_TRIGGERED"]
+      },
+      "doc": "Type of order event"
+    },
+    {
+      "name": "order_id",
+      "type": "string",
+      "doc": "Exchange order ID"
+    },
+    {
+      "name": "client_order_id",
+      "type": "string",
+      "doc": "Internal order ID for idempotency"
+    },
+    {
+      "name": "symbol",
+      "type": "string",
+      "doc": "Trading pair"
+    },
+    {
+      "name": "side",
+      "type": {
+        "type": "enum",
+        "name": "OrderSide",
+        "symbols": ["BUY", "SELL"]
+      },
+      "doc": "Order side"
+    },
+    {
+      "name": "order_type",
+      "type": {
+        "type": "enum",
+        "name": "OrderType",
+        "symbols": ["MARKET", "LIMIT", "STOP_LOSS", "STOP_LOSS_LIMIT", "TAKE_PROFIT", "TAKE_PROFIT_LIMIT"]
+      },
+      "doc": "Order type"
+    },
+    {
+      "name": "quantity",
+      "type": "double",
+      "doc": "Order quantity"
+    },
+    {
+      "name": "price",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Order price (for LIMIT orders)"
+    },
+    {
+      "name": "stop_price",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Stop price (for STOP orders)"
+    },
+    {
+      "name": "filled_quantity",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Filled quantity (for FILLED/PARTIAL_FILL events)"
+    },
+    {
+      "name": "average_price",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Average execution price"
+    },
+    {
+      "name": "commission",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Commission paid"
+    },
+    {
+      "name": "commission_asset",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Commission asset"
+    },
+    {
+      "name": "status",
+      "type": {
+        "type": "enum",
+        "name": "OrderStatus",
+        "symbols": ["NEW", "PARTIALLY_FILLED", "FILLED", "CANCELED", "REJECTED", "EXPIRED"]
+      },
+      "doc": "Current order status"
+    },
+    {
+      "name": "error",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Error message (for REJECTED events)"
+    },
+    {
+      "name": "signal_reference",
+      "type": ["null", {
+        "type": "record",
+        "name": "SignalReference",
+        "fields": [
+          {
+            "name": "signal_id",
+            "type": "string"
+          },
+          {
+            "name": "strategy",
+            "type": "string"
+          },
+          {
+            "name": "source",
+            "type": "string"
+          }
+        ]
+      }],
+      "default": null,
+      "doc": "Reference to original signal"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Event timestamp"
+    }
+  ]
+}
+
