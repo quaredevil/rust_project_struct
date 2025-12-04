@@ -27,10 +27,10 @@ Projeto atual: [crypto-listener | crypto-trader | crypto-signals | crypto-notifi
 ### 2. Ler Documentação de Fronteiras
 **ORDEM DE LEITURA OBRIGATÓRIA:**
 
-1. `BOUNDARIES_{projeto_atual}.md` - Fronteiras específicas do projeto
-2. `WHICH_PROJECT_DOES_WHAT.md` - Guia rápido de decisão
-3. `BOUNDARIES_GUIDE.md` - Guia geral do ecossistema
-4. `{projeto}_projectmap.yaml` - Estrutura técnica
+1. `_base/{projeto}/BOUNDARIES.md` - Fronteiras específicas do projeto
+2. `_base/WHICH_PROJECT_DOES_WHAT.md` - Guia rápido de decisão
+3. `_base/BOUNDARIES_GUIDE.md` - Guia geral do ecossistema
+4. `_base/{projeto}/projectmap.yaml` - Estrutura técnica
 
 ### 3. Validar Escopo
 Antes de cada funcionalidade, responda:
@@ -698,12 +698,13 @@ NUNCA NADO ENTRE ILHAS (HTTP direto, shared DB, etc.).
 
 ## 📞 Quando em Dúvida
 
-1. Consulte: `BOUNDARIES_{projeto}.md`
-2. Consulte: `WHICH_PROJECT_DOES_WHAT.md`
-3. Consulte: `BOUNDARIES_GUIDE.md`
-4. Consulte: Este arquivo
-5. Pergunte: "Isso está nas responsibilities do meu projeto?"
-6. Se NÃO: Encontre o projeto correto e use Kafka
+1. Consulte: `_base/{projeto}/BOUNDARIES.md`
+2. Consulte: `_base/{projeto}/projectmap.yaml`
+3. Consulte: `_base/WHICH_PROJECT_DOES_WHAT.md`
+4. Consulte: `_base/BOUNDARIES_GUIDE.md`
+5. Consulte: Este arquivo
+6. Pergunte: "Isso está nas responsibilities do meu projeto?"
+7. Se NÃO: Encontre o projeto correto e use Kafka
 
 ---
 

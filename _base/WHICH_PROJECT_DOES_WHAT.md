@@ -495,15 +495,25 @@ Antes de implementar qualquer funcionalidade:
 
 ## 🔗 Documentação Relacionada
 
-- `BOUNDARIES_crypto-listener.md` - Fronteiras do listener
-- `BOUNDARIES_crypto-webhook.md` - Fronteiras do webhook
-- `BOUNDARIES_crypto-signals.md` - Fronteiras do signals
-- `BOUNDARIES_crypto-trader.md` - Fronteiras do trader
-- `BOUNDARIES_crypto-management.md` - Fronteiras do management
-- `BOUNDARIES_crypto-notifications.md` - Fronteiras do notifications
+### Documentação por Projeto (em subpastas)
+- `crypto-listener/BOUNDARIES.md` - Fronteiras do listener
+- `crypto-listener/projectmap.yaml` - Mapa do listener
+- `crypto-webhook/BOUNDARIES.md` - Fronteiras do webhook
+- `crypto-webhook/projectmap.yaml` - Mapa do webhook
+- `crypto-signals/BOUNDARIES.md` - Fronteiras do signals
+- `crypto-signals/projectmap.yaml` - Mapa do signals
+- `crypto-trader/BOUNDARIES.md` - Fronteiras do trader
+- `crypto-trader/projectmap.yaml` - Mapa do trader
+- `crypto-management/BOUNDARIES.md` - Fronteiras do management
+- `crypto-management/projectmap.yaml` - Mapa do management
+- `crypto-notifications/BOUNDARIES.md` - Fronteiras do notifications
+- `crypto-notifications/projectmap.yaml` - Mapa do notifications
+
+### Documentação Geral (na raiz _base/)
 - `BOUNDARIES_GUIDE.md` - Guia geral de fronteiras
 - `LLM_IMPLEMENTATION_PROMPT.md` - Instruções para LLM
 - `IMPLEMENTATION_PATTERNS.md` - Padrões de código
+- `WHICH_PROJECT_DOES_WHAT.md` - Este arquivo
 
 ---
 
