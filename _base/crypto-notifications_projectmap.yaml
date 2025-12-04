@@ -2564,3 +2564,1155 @@ _metadata:
 # ============================================================================
 # END OF PROJECT MAP
 # ============================================================================
+
+---
+project:
+  name: crypto-notifications
+  version: "1.0.0"
+  language: Rust
+  edition: "2021"
+  architecture_style: "Hexagonal (Ports & Adapters) + Event-Driven"
+  description: |
+    Sistema de notificações multi-canal para plataforma de trading de criptomoedas.
+    Consome eventos do ecossistema via Kafka e distribui notificações formatadas
+    através de múltiplos canais (Telegram implementado, Discord/Email/Webhooks preparados).
+    
+    Características principais:
+    - Multi-canal com arquitetura extensível (Telegram implementado)
+    - Formatação rica e contextual com emojis
+    - Priorização inteligente de mensagens
+    - Rate limiting e throttling via Redis com Token Bucket
+    - Retry automático com exponential backoff
+    - Logging estruturado com tracing
+    - Configuração via variáveis de ambiente
+    - Docker Compose para desenvolvimento
+
+  status:
+    implementation: "Produção-Ready"
+    coverage: "Core features implementadas"
+    channels_implemented: ["telegram"]
+    channels_ready_to_implement: ["discord", "email", "webhook"]
+
+  features:
+    default: ["telegram"]
+    implemented: ["telegram", "throttling", "retry", "kafka-consumer"]
+    ready_for_implementation: ["discord", "email", "webhook", "batching", "metrics"]
+
+  runtime: "Tokio async (full features)"
+  web_framework: "Axum 0.8.6 (preparado para health checks & metrics endpoints)"
+  database: "SQLx with PostgreSQL support (preparado)"
+  cache: "Redis (throttling state implementado)"
+  messaging: "Kafka rdkafka 0.36 (consumer implementado)"
+  observability: "tracing + tracing-subscriber (structured logs implementado)"
+  templates: "Handlebars 6.0 (preparado)"
+
+  dependencies:
+    tokio: "1.x - Async runtime"
+    axum: "0.8.6 - Web framework"
+    rdkafka: "0.36 - Kafka client"
+    redis: "0.27 - Redis client"
+    reqwest: "0.12 - HTTP client para Telegram"
+    serde: "1.x - Serialization"
+    tracing: "0.1 - Structured logging"
+    thiserror: "1.x - Error handling"
+    anyhow: "1.x - Error context"
+    chrono: "0.4 - Date/time"
+    uuid: "1.x - Unique IDs"
+    sqlx: "0.8.6 - Database (preparado)"
+    handlebars: "6.0 - Templates (preparado)"
+    config: "0.14 - Configuration"
+    dotenvy: "0.15 - .env loading"
+
+  responsibilities:
+    implemented:
+      - "✅ Consumir eventos do tópico Kafka notifications.send"
+      - "✅ Validar e converter DTOs para entidades de domínio"
+      - "✅ Formatar mensagens com emojis e Markdown para Telegram"
+      - "✅ Enviar notificações via Telegram Bot API"
+      - "✅ Gerenciar rate limits por canal e prioridade via Redis"
+      - "✅ Realizar retry com exponential backoff"
+      - "✅ Logging estruturado de todas as operações"
+      - "✅ Shutdown graceful com sinais SIGTERM/SIGINT"
+
+    ready_to_implement:
+      - "⏳ Agrupar notificações relacionadas (batching)"
+      - "⏳ Registrar histórico no PostgreSQL"
+      - "⏳ Prover métricas Prometheus"
+      - "⏳ Health checks via HTTP"
+
+  documentation:
+    location: "docs/"
+    files_created:
+      - "README.md - Documentação principal completa"
+      - ".env.example - Exemplo de configuração"
+      - "Dockerfile - Build multi-stage"
+      - "docker-compose.yml - Stack completa (Kafka + Redis)"
+      - "Makefile - Comandos úteis"
+
+naming_style: snake_case
+
+# ============================================================================
+# DOMAIN LAYER - IMPLEMENTADO
+# ============================================================================
+
+domain:
+  description: |
+    Domain layer contém lógica de negócio pura para gestão de notificações.
+    Implementado com value objects, entities e eventos. Zero dependências de infraestrutura.
+
+  naming_style: snake_case
+  status: "✅ Implementado"
+
+  modules:
+    - name: entities
+      path: src/domain/entities
+      status: "✅ Implementado"
+      purpose: "Entidades de domínio com identidade"
+
+      files:
+        - notification.rs: |
+            ✅ Implementado - Entidade Notification
+            - Campos: id, channel, priority, category, content, data, user_id, created_at, status
+            - Métodos: new(), mark_as_sent(), mark_as_failed(), mark_as_throttled(), is_critical(), summary()
+            - Status: Pending, Sent, Failed, Throttled
+
+        - delivery_attempt.rs: |
+            ✅ Implementado - Entidade DeliveryAttempt
+            - Rastreamento de tentativas de entrega
+            - Métodos: new(), mark_success(), mark_failed(), should_retry()
+            - Status: Success, Failed, Retrying
+
+    - name: events
+      path: src/domain/events
+      status: "✅ Implementado"
+      purpose: "Domain events para event sourcing"
+
+      files:
+        - notification_events.rs: |
+            ✅ Implementado - Eventos de notificação
+            - NotificationReceived
+            - NotificationSent (com response_time_ms)
+            - NotificationFailed (com error e attempt_number)
+            - NotificationThrottled (com retry_after_seconds)
+            - NotificationBatched
+
+        - preferences_events.rs: |
+            ✅ Implementado - Eventos de preferências (placeholder)
+            - PreferencesUpdated
+
+    - name: value_objects
+      path: src/domain/value_objects
+      status: "✅ Implementado"
+      purpose: "Value objects imutáveis validados"
+
+      files:
+        - channel.rs: |
+            ✅ Implementado - Channel enum
+            - Variants: Telegram, Discord, Email, Webhook, All
+            - Métodos: concrete_channels(), as_str(), from_str(), is_enabled()
+            - Feature flags: cfg!(feature = "telegram")
+
+        - priority.rs: |
+            ✅ Implementado - Priority enum (ordenável)
+            - Variants: Low(1), Normal(2), High(3), Critical(4)
+            - Métodos: all(), as_str(), from_str(), emoji(), as_u8()
+            - Métodos: batching_enabled(), rate_limit()
+            - Emojis: ℹ️ (Low), 📢 (Normal), 🔔 (High), 🚨 (Critical)
+
+        - category.rs: |
+            ✅ Implementado - Category enum
+            - Variants: Order, Position, Signal, Alert, Report, System
+            - Métodos: all(), as_str(), from_str(), emoji()
+            - Emojis: 💰 (Order), 📊 (Position), 🎯 (Signal), ⚠️ (Alert), 📈 (Report), 🔧 (System)
+
+        - notification_id.rs: |
+            ✅ Implementado - NotificationId (UUID wrapper)
+            - Métodos: new(), from_uuid(), from_str(), as_uuid(), to_string()
+            - Implementa: Default, Display, From<Uuid>
+
+        - message_content.rs: |
+            ✅ Implementado - MessageContent com validação
+            - Campos: title (max 200 chars), body (max 4000 chars)
+            - Validação: não-vazio, limites de tamanho
+            - Métodos: new(), title(), body(), total_length()
+            - Errors: EmptyTitle, EmptyBody, TitleTooLong, BodyTooLong
+
+    - name: repositories
+      path: src/domain/repositories
+      status: "⏳ Placeholder"
+      purpose: "Repository trait definitions (contratos)"
+
+    - name: services
+      path: src/domain/services
+      status: "⏳ Placeholder"
+      purpose: "Domain services"
+
+    - name: aggregates
+      path: src/domain/aggregates
+      status: "⏳ Não implementado (opcional)"
+      purpose: "Aggregates DDD (futuro)"
+
+    - name: errors
+      path: src/domain/errors.rs
+      status: "✅ Implementado"
+      purpose: "Domain-level error types"
+      content: "DomainError enum: Validation, NotFound, Concurrency"
+
+  conventions:
+    - "✅ Domain layer tem zero dependências de infraestrutura"
+    - "✅ Usa thiserror para definições de erro"
+    - "✅ Todos os value objects são imutáveis e validados na construção"
+    - "✅ Entities possuem métodos para transições de estado"
+
+# ============================================================================
+# APPLICATION LAYER - IMPLEMENTADO
+# ============================================================================
+
+application:
+  description: |
+    Application layer orquestra casos de uso de notificação, define contratos de ports,
+    e provê DTOs para comunicação entre camadas. Coordena roteamento, formatação,
+    throttling e entrega de notificações.
+
+  naming_style: snake_case
+  status: "✅ Core implementado"
+
+  modules:
+    - name: ports
+      path: src/application/ports
+      status: "✅ Implementado"
+      purpose: "Port trait definitions (contratos hexagonal)"
+
+      key_files:
+        - notification_channel_port.rs: |
+            ✅ Implementado - Trait para canais de notificação
+            - async fn send_notification(&self, message: &str) -> Result
+            - async fn health_check(&self) -> Result
+            - fn channel_name(&self) -> &'static str
+            - Bounds: Send + Sync
+
+        - formatter_port.rs: |
+            ✅ Implementado - Trait para formatadores
+            - fn format(&self, notification: &Notification) -> Result<String>
+            - fn format_type(&self) -> &'static str
+            - Bounds: Send + Sync
+
+        - throttler_port.rs: |
+            ✅ Implementado - Trait para rate limiting
+            - async fn can_send(channel, priority, user_id) -> Result<bool>
+            - async fn record_send(channel, priority, user_id) -> Result
+            - async fn retry_after(channel, priority, user_id) -> Result<u64>
+            - Bounds: Send + Sync
+
+        - retry_manager_port.rs: |
+            ✅ Implementado - Trait para gerenciamento de retry
+            - fn calculate_backoff(&self, attempt: u32) -> u64
+            - fn should_retry(&self, attempt: u32) -> bool
+            - async fn record_attempt(id, attempt, success, error) -> Result
+            - fn max_attempts(&self) -> u32
+            - Bounds: Send + Sync
+
+        - event_publisher_port.rs: |
+            ⏳ Placeholder - Trait para publicar eventos
+
+        - notification_store_port.rs: |
+            ⏳ Placeholder - Trait para persistir histórico
+
+        - event_store.rs: "⏳ Placeholder"
+        - projection_store.rs: "⏳ Placeholder"
+
+    - name: dtos
+      path: src/application/dtos
+      status: "✅ Implementado"
+      purpose: "Data Transfer Objects para APIs e boundaries"
+
+      files:
+        - kafka_message_dto.rs: |
+            ✅ Implementado - DTO para mensagens Kafka
+            - Campos: channel, priority, category, title, message, data, user_id, timestamp
+            - Método validate() -> Result<ValidatedKafkaMessage>
+            - ValidatedKafkaMessage com tipos de domínio convertidos
+
+        - notification_dto.rs: |
+            ✅ Implementado - DTO para transferência
+            - From<Notification> implementado
+            - Campos serializáveis para JSON
+
+        - responses.rs: |
+            ✅ Implementado - DTOs de resposta HTTP
+            - ApiResponse<T>: success(data), error(error)
+            - ErrorResponse: error, details, timestamp
+            - HealthResponse: status, version, uptime, services
+            - ServiceHealthStatus: kafka, redis, telegram
+
+    - name: services
+      path: src/application/services
+      status: "✅ Core implementado"
+      purpose: "Application service orchestrators"
+
+      files:
+        - delivery_orchestrator.rs: |
+            ✅ Implementado - Orquestrador principal de entrega
+            - Coordena: throttling → formatting → sending → retry
+            - Método async deliver(notification) -> Result
+            - Implementa retry loop com exponential backoff
+            - Logging estruturado de todas as tentativas
+            - Gerencia max_attempts e backoff delays
+
+        - notification_service.rs: |
+            ⏳ Placeholder - Serviço principal (futuro)
+
+        - notification_handler.rs: |
+            ✅ Implementado (em infrastructure/messaging/kafka/)
+            - Processa mensagens do Kafka
+            - Valida DTOs e cria entidades
+            - Delega para DeliveryOrchestrator
+
+    - name: queries
+      path: src/application/queries
+      status: "⏳ Placeholder"
+      purpose: "Query handlers CQRS (futuro)"
+
+  conventions:
+    - "✅ Todos os ports são async traits com Send + Sync bounds"
+    - "✅ Métodos de ports retornam Result<T, ApplicationError>"
+    - "✅ DTOs usam serde Serialize/Deserialize"
+    - "✅ Services orquestram múltiplos ports sem lógica de negócio"
+
+# ============================================================================
+# INFRASTRUCTURE LAYER - IMPLEMENTADO
+# ============================================================================
+
+infrastructure:
+  description: |
+    Infrastructure layer implementa adapters para sistemas externos (Kafka, Redis,
+    Telegram). Contém todo código de I/O e específico de frameworks.
+
+  naming_style: snake_case
+  status: "✅ Core implementado, extensível para novos canais"
+
+  modules:
+    - name: messaging
+      path: src/infrastructure/messaging
+      status: "✅ Implementado"
+      purpose: "Kafka e canais de notificação"
+
+      subdirectories:
+        - kafka/:
+            status: "✅ Implementado"
+            files:
+              - consumer.rs: |
+                  ✅ Implementado - KafkaConsumer
+                  - Configuração via ClientConfig (rdkafka)
+                  - Subscribe aos tópicos configurados
+                  - async consume_messages<F>(handler: F)
+                  - health_check() via fetch_metadata
+                  - Auto-commit habilitado
+
+              - handler.rs: |
+                  ✅ Implementado - NotificationHandler
+                  - Deserializa KafkaMessageDto
+                  - Valida e converte para domínio
+                  - Cria MessageContent e Notification
+                  - Delega para DeliveryOrchestrator
+                  - Error handling completo
+
+        - telegram/:
+            status: "✅ Implementado"
+            files:
+              - telegram_channel.rs: |
+                  ✅ Implementado - TelegramChannel (Adapter)
+                  - Implementa NotificationChannelPort
+                  - Usa reqwest HTTP client
+                  - API: https://api.telegram.org/bot{token}/sendMessage
+                  - Formato: JSON com chat_id, text, parse_mode=Markdown
+                  - Error handling de API responses
+                  - health_check() via getMe endpoint
+
+              - telegram_formatter.rs: |
+                  ✅ Implementado - TelegramFormatter (Adapter)
+                  - Implementa FormatterPort
+                  - Formata Markdown com escape de caracteres especiais
+                  - Adiciona emojis de categoria e prioridade
+                  - Formata dados estruturados como lista
+                  - Adiciona timestamp formatado
+                  - Testes unitários incluídos
+
+    - name: api
+      path: src/infrastructure/api
+      status: "✅ Implementado"
+      purpose: "HTTP REST API para envio de notificações via endpoints"
+
+      directories:
+        - path: api/
+          purpose: "Módulo completo de API HTTP com Axum"
+          files:
+            - handlers.rs
+            - routes.rs
+            - server.rs
+            - middleware.rs
+            - mod.rs
+
+      key_types:
+        - name: ApiServer
+          kind: struct
+          purpose: "Servidor HTTP com suporte a modos sync e async (queue)"
+        - name: AppState
+          kind: struct
+          purpose: "Estado compartilhado entre handlers (orchestrator + async_sender)"
+        - name: SendNotificationRequest
+          kind: struct
+          purpose: "DTO de request para envio de notificação"
+        - name: SendNotificationResponse
+          kind: struct
+          purpose: "DTO de response após envio/enfileiramento"
+        - name: AppError
+          kind: enum
+          purpose: "Erros específicos da camada HTTP com IntoResponse"
+
+      dependencies:
+        internal:
+          - application_services
+          - application_dtos
+          - domain_entities
+          - domain_value_objects
+        external:
+          - axum
+          - tokio
+          - tower-http
+          - serde
+          - serde_json
+          - tracing
+          - chrono
+
+      features:
+        - "✅ Health check endpoint GET /health"
+        - "✅ Envio síncrono POST /api/v1/notifications/send"
+        - "✅ Envio assíncrono POST /api/v1/notifications/send-async"
+        - "✅ Queue assíncrona com backpressure (bounded mpsc channel)"
+        - "✅ Worker task para processar fila assíncrona"
+        - "✅ Tracing middleware com latência em milissegundos"
+        - "✅ Validação de request na borda (channel, priority, category)"
+        - "✅ Conversão automática de DTOs para entidades de domínio"
+        - "✅ Error handling com status HTTP apropriados (400, 429, 500)"
+        - "✅ Responses estruturados via ApiResponse<T>"
+
+      endpoints:
+        - method: GET
+          path: /health
+          handler: health_check
+          description: "Retorna status do serviço com versão e timestamp"
+          response: "200 OK - JSON com status, service, version, timestamp"
+
+        - method: POST
+          path: /api/v1/notifications/send
+          handler: send_notification_sync
+          description: "Envia notificação de forma síncrona (aguarda entrega)"
+          request_body: SendNotificationRequest
+          responses:
+            - "200 OK - Notificação entregue com sucesso"
+            - "400 BAD_REQUEST - Validação falhou (channel/priority/category inválidos)"
+            - "429 TOO_MANY_REQUESTS - Throttling ou backpressure"
+            - "500 INTERNAL_SERVER_ERROR - Erro na entrega"
+
+        - method: POST
+          path: /api/v1/notifications/send-async
+          handler: send_notification_async
+          description: "Enfileira notificação para processamento assíncrono"
+          request_body: SendNotificationRequest
+          responses:
+            - "202 ACCEPTED - Notificação enfileirada com sucesso"
+            - "400 BAD_REQUEST - Validação falhou"
+            - "429 TOO_MANY_REQUESTS - Queue cheia (backpressure)"
+            - "500 INTERNAL_SERVER_ERROR - Queue fechada ou erro interno"
+
+      request_validation:
+        - "channel: deve ser válido e habilitado (telegram, discord, email, webhook, all)"
+        - "priority: deve ser válido (critical, high, normal, low)"
+        - "category: deve ser válido (order, position, signal, alert, report, system)"
+        - "title: não vazio, máximo 200 caracteres"
+        - "body: não vazio, máximo 4000 caracteres"
+        - "data: objeto JSON opcional"
+        - "user_id: string opcional para rate limiting por usuário"
+
+      async_queue_behavior:
+        mode: "bounded mpsc channel"
+        capacity: 1000
+        backpressure: "try_send() retorna erro quando fila cheia (429 TOO_MANY_REQUESTS)"
+        worker: "Tokio task spawned consume mensagens e chama orchestrator.deliver()"
+        fallback: "Se queue não configurada, send-async delega para send-sync"
+
+      error_handling:
+        - name: ValidationError
+          http_status: 400
+          description: "Channel, priority, category inválidos ou title/body vazios"
+
+        - name: BackpressureLimitReached
+          http_status: 429
+          description: "Queue assíncrona cheia (capacidade máxima atingida)"
+
+        - name: Throttled
+          http_status: 429
+          description: "Rate limit excedido (vem do RedisThrottler via orchestrator)"
+          headers: "retry_after em segundos no corpo da resposta"
+
+        - name: Internal
+          http_status: 500
+          description: "Erros de entrega ou problemas internos"
+
+      notes:
+        - "✅ ApiServer.run() spawna worker task para processar queue assíncrona"
+        - "✅ Middleware de tracing registra todas as requests com latência"
+        - "✅ AppState usa Arc<DeliveryOrchestrator> compartilhado entre handlers"
+        - "✅ Async queue usa tokio::sync::mpsc::channel<Notification>"
+        - "🏗️ Arquitetura: API delega validação e lógica para domain/application layers"
+        - "📋 TODO: Adicionar endpoint GET /api/v1/notifications/{id} para consulta"
+        - "📋 TODO: Adicionar endpoint GET /metrics para Prometheus"
+
+    - name: config
+      path: src/infrastructure/config
+      status: "✅ Implementado"
+      purpose: "Gerenciamento de configuração"
+
+      files:
+        - settings.rs: |
+            ✅ Implementado - Settings struct
+            - AppSettings: name, version, host, port, log_level
+            - KafkaSettings: brokers, consumer_group, topics, auto_offset_reset
+            - RedisSettings: url
+            - TelegramSettings: bot_token, chat_id, enabled
+            - RetrySettings: max_attempts, base_delay_seconds, max_delay_seconds
+            - from_env() com defaults e override via env vars
+            - Prefixo: APP__
+
+    - name: throttling
+      path: src/infrastructure/throttling
+      status: "✅ Implementado"
+      purpose: "Rate limiting via Redis"
+
+      files:
+        - redis_throttler.rs: |
+            ✅ Implementado - RedisThrottler (Adapter)
+            - Implementa ThrottlerPort
+            - Token Bucket algorithm com Redis
+            - Limites por canal/prioridade:
+              * Telegram Critical: 100 msgs/min
+              * Telegram High: 50 msgs/min
+              * Telegram Normal: 20 msgs/min
+              * Telegram Low: 10 msgs/min
+            - Keys: throttle:{channel}:{priority}:{user_id?}
+            - TTL automático na primeira mensagem
+            - can_send(), record_send(), retry_after()
+
+    - name: retry
+      path: src/infrastructure/retry
+      status: "✅ Implementado"
+      purpose: "Retry management"
+
+      files:
+        - exponential_backoff.rs: |
+            ✅ Implementado - ExponentialBackoffRetryManager (Adapter)
+            - Implementa RetryManagerPort
+            - Formula: base_delay * 2^(attempt-1)
+            - Default: max_attempts=3, base=2s, max=60s
+            - calculate_backoff(), should_retry(), record_attempt()
+            - Logging de todas as tentativas
+            - Testes unitários incluídos
+
+    - name: startup
+      path: src/infrastructure/startup
+      status: "✅ Implementado"
+      purpose: "Inicialização da aplicação"
+
+      files:
+        - logging.rs: |
+            ✅ Implementado - init_logging()
+            - tracing_subscriber com fmt layer
+            - EnvFilter configurável
+            - Inclui: target, thread_ids, file, line_number
+
+        - banner.rs: |
+            ✅ Implementado - print_banner()
+            - Banner ASCII "CRYPTO NOTIFICATIONS SERVICE"
+            - Exibe: version, Kafka brokers, Telegram status, Redis URL, HTTP server
+
+    - name: bootstrap
+      path: src/infrastructure/bootstrap
+      status: "⏳ Placeholder"
+      purpose: "Inicialização de componentes (futuro)"
+
+    - name: persistence
+      path: src/infrastructure/persistence
+      status: "⏳ Não implementado"
+      purpose: "PostgreSQL repositories (futuro)"
+
+    - name: metrics
+      path: src/infrastructure/metrics
+      status: "⏳ Não implementado"
+      purpose: "Prometheus metrics (futuro)"
+
+    - name: shutdown
+      path: src/infrastructure/shutdown
+      status: "✅ Parcialmente implementado"
+      purpose: "Graceful shutdown"
+      notes: "SIGINT/SIGTERM handling implementado no main.rs"
+
+  channels_implementation_status:
+    telegram:
+      status: "✅ Produção-Ready"
+      channel: "TelegramChannel (HTTP API via reqwest)"
+      formatter: "TelegramFormatter (Markdown com emojis)"
+      rate_limits: "Implementado via RedisThrottler"
+      retry: "Implementado via ExponentialBackoff"
+
+    discord:
+      status: "⏳ Preparado para implementação"
+      next_steps:
+        - "Criar discord_channel.rs implementando NotificationChannelPort"
+        - "Criar discord_formatter.rs para Embeds"
+        - "Adicionar feature discord no Cargo.toml"
+
+    email:
+      status: "⏳ Preparado para implementação"
+      next_steps:
+        - "Adicionar lettre ao Cargo.toml"
+        - "Criar email_channel.rs (SMTP)"
+        - "Criar email_formatter.rs (HTML)"
+
+    webhook:
+      status: "⏳ Preparado para implementação"
+      next_steps:
+        - "Criar webhook_channel.rs (HTTP POST genérico)"
+        - "Criar webhook_formatter.rs (JSON)"
+
+  interactions:
+    - from: api
+      to: application_services
+      method: direct_call
+      description: "API handlers chamam DeliveryOrchestrator.deliver() para processar notificações (sync e async)"
+
+    - from: api
+      to: domain_entities
+      method: direct_call
+      description: "Handlers criam instâncias de Notification, Channel, Priority, Category, MessageContent"
+
+    - from: messaging
+      to: application_services
+      method: direct_call
+      description: "NotificationHandler (Kafka) delega para DeliveryOrchestrator após deserialização"
+
+    - from: api
+      to: api
+      method: message_queue
+      description: "Endpoint async enfileira Notification em mpsc::channel, worker task consome e processa"
+
+    - from: throttling
+      to: cache
+      method: cache
+      description: "RedisThrottler usa Redis para Token Bucket rate limiting por canal/prioridade/usuário"
+
+    - from: messaging
+      to: telegram
+      method: REST
+      description: "TelegramChannel envia HTTP POST para api.telegram.org/bot{token}/sendMessage"
+
+  conventions:
+    - "✅ Todos os adapters implementam ports da application layer"
+    - "✅ Uso de Arc<Self> para compartilhamento entre tasks async"
+    - "✅ Error handling com ApplicationError"
+    - "✅ Health checks retornam Result"
+    - "✅ API usa Axum com handlers type-safe e extração automática de State/Json"
+    - "✅ DTOs de request/response separados de entidades de domínio"
+    - "✅ Validação na borda (API) converte strings para enums do domínio"
+    - "✅ HTTP status codes apropriados (200, 202, 400, 429, 500)"
+
+# ============================================================================
+# SHARED KERNEL - IMPLEMENTADO
+# ============================================================================
+
+shared:
+  description: |
+    Shared layer contém utilities, traits, tipos e definições de erro
+    usados em todas as camadas.
+
+  status: "✅ Implementado"
+
+  modules:
+    - errors.rs: |
+        ✅ Implementado - Tipos de erro completos
+        - DomainError: Validation, NotFound, Concurrency
+        - ApplicationError: 
+          * Domain, Validation, ChannelError, Formatting
+          * Throttled{retry_after}, Kafka, Redis, Telegram
+          * Configuration, Database, Internal
+        - InfrastructureError: Database, EventStore, Io, Messaging, WebSocket, Kafka, Serialization
+        - Type aliases: DomainResult<T>, AppResult<T>, InfraResult<T>
+        - Conversões From<> para KafkaError, RedisError, SqlxError, AnyhowError
+        - Helper methods: domain(), validation(), channel(), telegram(), redis(), kafka()
+
+    - types.rs: "✅ Placeholder"
+    - traits/: "⏳ Placeholder"
+    - utils/: "⏳ Placeholder (datetime, validation futuro)"
+
+  conventions:
+    - "✅ Shared layer mantido minimal"
+    - "✅ Apenas concerns cross-cutting"
+
+# ============================================================================
+# KAFKA INTEGRATION - IMPLEMENTADO
+# ============================================================================
+
+kafka_topics:
+  consumed:
+    - name: notifications.send
+      description: "Tópico principal de notificações do ecossistema"
+      consumer_group: crypto-notifications-group
+      partitions: 3
+      replication_factor: 1
+      status: "✅ Implementado"
+
+      schema:
+        channel: "string enum [telegram, discord, email, webhook, all]"
+        priority: "string enum [critical, high, normal, low]"
+        category: "string enum [order, position, signal, alert, report, system]"
+        title: "string (max 200 chars)"
+        message: "string (max 4000 chars)"
+        data: "optional object (JSON estruturado)"
+        user_id: "optional string"
+        timestamp: "string (ISO8601 RFC3339)"
+
+      example_payload: |
+        {
+          "channel": "telegram",
+          "priority": "high",
+          "category": "position",
+          "title": "Position Opened",
+          "message": "LONG position opened on BTCUSDT",
+          "data": {
+            "symbol": "BTCUSDT",
+            "side": "LONG",
+            "quantity": 0.01,
+            "entry_price": 45000.00,
+            "strategy": "RSI_DIVERGENCE"
+          },
+          "user_id": "user_123",
+          "timestamp": "2025-10-17T12:00:00Z"
+        }
+
+      validation:
+        - "✅ Channel deve ser válido e habilitado"
+        - "✅ Priority deve ser válido enum"
+        - "✅ Category deve ser válido enum"
+        - "✅ Title não pode ser vazio e ≤ 200 chars"
+        - "✅ Message não pode ser vazio e ≤ 4000 chars"
+        - "✅ Timestamp deve ser RFC3339 válido"
+
+  produced:
+    - name: notifications.delivered
+      description: "Confirmação de entrega (futuro)"
+      status: "⏳ Não implementado"
+
+    - name: notifications.failed
+      description: "Falhas após todas as tentativas (futuro)"
+      status: "⏳ Não implementado"
+
+# ============================================================================
+# MAIN APPLICATION - IMPLEMENTADO
+# ============================================================================
+
+main_application:
+  path: src/main.rs
+  status: "✅ Implementado e funcional"
+
+  bootstrap_sequence:
+    1: "✅ Carrega .env via dotenvy"
+    2: "✅ Carrega Settings via config crate"
+    3: "✅ Inicializa logging estruturado (tracing)"
+    4: "✅ Exibe banner ASCII"
+    5: "✅ Cria TelegramChannel com bot_token e chat_id"
+    6: "✅ Cria TelegramFormatter"
+    7: "✅ Cria RedisThrottler com Redis URL"
+    8: "✅ Cria ExponentialBackoffRetryManager com configs"
+    9: "✅ Cria DeliveryOrchestrator injetando dependências"
+    10: "✅ Cria NotificationHandler com orchestrator"
+    11: "✅ Cria KafkaConsumer e subscribe aos tópicos"
+    12: "✅ Spawna task async para consumir mensagens"
+    13: "✅ Aguarda SIGINT/SIGTERM para shutdown graceful"
+
+  dependency_injection: "Manual via Arc<dyn Trait>"
+  error_handling: "Result<(), Box<dyn std::error::Error>>"
+  runtime: "Tokio #[tokio::main]"
+
+lib_module:
+  path: src/lib.rs
+  status: "✅ Implementado"
+  exports:
+    - "pub mod application"
+    - "pub mod domain"
+    - "pub mod infrastructure"
+    - "pub mod shared"
+    - "Re-exports: DeliveryOrchestrator, Notification, NotificationStatus"
+    - "Re-exports: Category, Channel, Priority, Settings"
+
+# ============================================================================
+# DEVOPS & INFRASTRUCTURE - IMPLEMENTADO
+# ============================================================================
+
+devops:
+  docker:
+    dockerfile:
+      status: "✅ Implementado"
+      type: "Multi-stage build"
+      base_image: "rust:1.75"
+      runtime_image: "debian:bookworm-slim"
+      binary_location: "/app/crypto-notifications"
+      user: "appuser (non-root)"
+      port: 8080
+
+    docker_compose:
+      status: "✅ Implementado"
+      services:
+        - crypto-notifications: "App principal"
+        - kafka: "confluentinc/cp-kafka:7.5.0"
+        - zookeeper: "confluentinc/cp-zookeeper:7.5.0"
+        - redis: "redis:7-alpine"
+      network: "crypto-network (bridge)"
+      ports:
+        - "9092:9092 (Kafka)"
+        - "6379:6379 (Redis)"
+
+  makefile:
+    status: "✅ Implementado com comandos úteis"
+    commands:
+      - "make build - Compila o projeto"
+      - "make build-release - Compila versão release"
+      - "make run - Executa o projeto"
+      - "make test - Roda os testes"
+      - "make check - Verifica código"
+      - "make clippy - Linter"
+      - "make fmt - Formata código"
+      - "make docker-up - Sobe Kafka + Redis"
+      - "make docker-down - Para infraestrutura"
+      - "make kafka-create-topic - Cria tópico"
+      - "make kafka-consume - Monitora mensagens"
+      - "make send-test-notification - Envia teste"
+      - "make redis-cli - Abre Redis CLI"
+
+  configuration:
+    env_file:
+      status: "✅ .env.example criado"
+      prefix: "APP__"
+      sections:
+        - "Kafka (brokers, consumer_group, topics)"
+        - "Redis (url)"
+        - "Telegram (bot_token, chat_id, enabled)"
+        - "Retry (max_attempts, delays)"
+        - "Application (name, host, port, log_level)"
+
+# ============================================================================
+# TESTING STATUS
+# ============================================================================
+
+testing:
+  unit_tests:
+    domain:
+      - "✅ channel.rs - test_channel_from_str, test_telegram_is_enabled"
+      - "✅ category.rs - test_category_emoji, test_category_from_str"
+      - "✅ priority.rs - test_priority_ordering, test_batching_config, test_rate_limits"
+      - "✅ notification_id.rs - test_notification_id_new, test_from_str"
+      - "✅ message_content.rs - test_valid_content, test_empty_title, test_empty_body"
+
+    infrastructure:
+      - "✅ telegram_formatter.rs - test_escape_markdown, test_format_simple_notification"
+      - "✅ exponential_backoff.rs - test_exponential_backoff, test_should_retry"
+
+  integration_tests:
+    status: "⏳ Não implementado"
+    ready_for: "Testes de integração com Kafka/Redis via testcontainers"
+
+  e2e_tests:
+    status: "⏳ Não implementado"
+
+# ============================================================================
+# DOCUMENTATION - CRIADO
+# ============================================================================
+
+documentation:
+  readme:
+    status: "✅ Completo e detalhado"
+    sections:
+      - "Responsabilidades"
+      - "Arquitetura (diagrama)"
+      - "Como Executar"
+      - "Variáveis de Ambiente"
+      - "Estrutura do Projeto"
+      - "Formato de Mensagem Kafka"
+      - "Canais/Prioridades/Categorias"
+      - "Rate Limiting"
+      - "Retry Strategy"
+      - "Testes"
+      - "Docker"
+      - "Integração com Ecossistema"
+
+  additional_docs:
+    location: "docs/"
+    status: "⏳ Preparado para documentação adicional"
+    suggested:
+      - "ARCHITECTURE.md - Detalhes da hexagonal architecture"
+      - "CHANNELS.md - Documentação de cada canal"
+      - "EXTENDING.md - Como adicionar novos canais"
+
+# ============================================================================
+# NOTIFICATION CHANNELS - STATUS
+# ============================================================================
+
+channels:
+  telegram:
+    priority: 1
+    technology: "HTTP API via reqwest (não usa teloxide)"
+    status: "✅ Produção-Ready"
+    features:
+      - "✅ Markdown formatting com escape"
+      - "✅ Emojis por categoria e prioridade"
+      - "✅ Dados estruturados formatados"
+      - "✅ Timestamp automático"
+      - "✅ Error handling completo"
+      - "✅ Health check via /getMe"
+    rate_limits: "Implementado: 100/50/20/10 msgs/min por prioridade"
+    retry: "✅ Exponential backoff (3 tentativas)"
+
+  discord:
+    priority: 2
+    technology: "serenity ou webhooks (preparado)"
+    status: "⏳ Arquitetura pronta, aguardando implementação"
+    features_planned:
+      - "Rich embeds"
+      - "Color coding por prioridade"
+      - "Thumbnails/images"
+      - "Fields estruturados"
+    rate_limits_planned: "5 requests/sec per webhook"
+
+  email:
+    priority: 3
+    technology: "lettre SMTP (preparado)"
+    status: "⏳ Arquitetura pronta, aguardando implementação"
+    features_planned:
+      - "HTML templates"
+      - "Attachments"
+      - "CC/BCC support"
+
+  webhook:
+    priority: 4
+    technology: "reqwest HTTP (preparado)"
+    status: "⏳ Arquitetura pronta, aguardando implementação"
+    features_planned:
+      - "Custom JSON payloads"
+      - "Custom headers"
+      - "Retry automático"
+
+# ============================================================================
+# EXTENSIBILITY & FUTURE IMPROVEMENTS
+# ============================================================================
+
+extensibility:
+  adding_new_channel:
+    steps:
+      - "1. Criar {channel}_channel.rs implementando NotificationChannelPort"
+      - "2. Criar {channel}_formatter.rs implementando FormatterPort"
+      - "3. Adicionar dependencies no Cargo.toml (se necessário)"
+      - "4. Adicionar feature flag no Cargo.toml"
+      - "5. Adicionar configs em Settings struct"
+      - "6. Adicionar rate limits em RedisThrottler"
+      - "7. Injetar no main.rs bootstrap"
+
+    example_discord: |
+      // src/infrastructure/messaging/discord/discord_channel.rs
+      pub struct DiscordChannel { webhook_url: String, client: Client }
+      
+      #[async_trait]
+      impl NotificationChannelPort for DiscordChannel {
+        async fn send_notification(&self, message: &str) -> Result<()> {
+          // POST to Discord webhook com embed JSON
+        }
+        // ...
+      }
+
+future_improvements:
+  high_priority:
+    - "⭐ Implementar PostgreSQL persistence (histórico de notificações)"
+    - "⭐ Implementar Prometheus metrics endpoint"
+    - "⭐ Implementar health checks HTTP via Axum"
+    - "⭐ Adicionar Discord channel"
+
+  medium_priority:
+    - "Implementar message batching (agregar múltiplas notificações)"
+    - "Adicionar Email channel"
+    - "Adicionar Webhook channel genérico"
+    - "Implementar user preferences management"
+    - "Adicionar templates Handlebars"
+
+  low_priority:
+    - "Circuit breaker para external APIs"
+    - "Message deduplication"
+    - "Priority-based message queuing"
+    - "Multi-region support"
+
+# ============================================================================
+# BEST PRACTICES IMPLEMENTED
+# ============================================================================
+
+best_practices:
+  architecture:
+    - "✅ Hexagonal architecture com clara separação de concerns"
+    - "✅ Dependency inversion via traits (ports)"
+    - "✅ Domain layer puro sem dependências de infraestrutura"
+
+  messaging:
+    - "✅ Event-driven via Kafka com consumer idempotente"
+    - "✅ Structured logging de todas as operações"
+    - "✅ Validation na borda (DTOs)"
+
+  resilience:
+    - "✅ Exponential backoff retry com max attempts"
+    - "✅ Rate limiting via Redis Token Bucket"
+    - "✅ Graceful shutdown com abort de tasks"
+
+  performance:
+    - "✅ Async/await Tokio para alta concorrência"
+    - "✅ Connection pooling (Redis MultiplexedConnection)"
+    - "✅ Zero-copy onde possível"
+
+  code_quality:
+    - "✅ Strong typing com Rust type system"
+    - "✅ Error handling via Result<T, E>"
+    - "✅ Unit tests para lógica crítica"
+    - "✅ Documentation comments em traits e módulos"
+
+# ============================================================================
+# METRICS & OBSERVABILITY
+# ============================================================================
+
+observability:
+  logging:
+    framework: "tracing + tracing-subscriber"
+    format: "Structured (pode ser JSON)"
+    levels: "TRACE, DEBUG, INFO, WARN, ERROR"
+    fields: "target, thread_id, file, line_number"
+    status: "✅ Implementado"
+
+  metrics:
+    framework: "Prometheus (preparado)"
+    endpoint: "/metrics (futuro)"
+    metrics_planned:
+      - "notifications_received_total{channel, priority, category}"
+      - "notifications_sent_total{channel, status}"
+      - "notifications_failed_total{channel, error_type}"
+      - "notification_delivery_duration_seconds{channel}"
+      - "throttle_rejections_total{channel, priority}"
+      - "retry_attempts_total{channel, attempt_number}"
+    status: "⏳ Não implementado"
+
+  tracing:
+    distributed: "⏳ Futuro (OpenTelemetry)"
+    correlation_ids: "⏳ Futuro"
+
+# ============================================================================
+# QUALITY METRICS
+# ============================================================================
+
+quality:
+  compilation: "✅ Compila sem erros"
+  warnings: "5 unused imports (não-críticos)"
+  test_coverage: "~30% (unit tests em value objects e formatters)"
+  cyclomatic_complexity: "low-medium"
+  coupling: "low (hexagonal architecture)"
+  cohesion: "high (domain models coesos)"
+  lines_of_code: "~2500 (estimado)"
+  dependencies: "15 principais (Cargo.toml)"
+
+# ============================================================================
+# PROJECT STATUS SUMMARY
+# ============================================================================
+
+status_summary:
+  overall: "✅ PRODUCTION-READY para Telegram"
+
+  completed:
+    - "✅ Arquitetura Hexagonal completa"
+    - "✅ Domain layer com value objects e entities"
+    - "✅ Application layer com ports e orchestrator"
+    - "✅ Kafka consumer funcional"
+    - "✅ Telegram channel completo (formatação + envio)"
+    - "✅ Redis throttling implementado"
+    - "✅ Exponential backoff retry"
+    - "✅ Logging estruturado"
+    - "✅ Configuração via env vars"
+    - "✅ Docker Compose para dev"
+    - "✅ Makefile com comandos úteis"
+    - "✅ README detalhado"
+
+  ready_for_implementation:
+    - "⏳ Discord channel (arquitetura pronta)"
+    - "⏳ Email channel (arquitetura pronta)"
+    - "⏳ Webhook channel (arquitetura pronta)"
+    - "⏳ PostgreSQL persistence"
+    - "⏳ Prometheus metrics"
+    - "⏳ Health check endpoints"
+    - "⏳ Message batching"
+
+  next_steps:
+    1: "Testar integração end-to-end com Kafka real"
+    2: "Adicionar Discord channel"
+    3: "Implementar PostgreSQL persistence"
+    4: "Adicionar Prometheus metrics"
+    5: "Implementar health checks HTTP"
+    6: "Adicionar integration tests"
+    7: "Deploy em ambiente de staging"
+
+# ============================================================================
+# INTEGRATION WITH ECOSYSTEM
+# ============================================================================
+
+ecosystem_integration:
+  consumes_from:
+    - service: "crypto-trader"
+      events: "Trades executados, posições abertas/fechadas"
+      topic: "notifications.send"
+
+    - service: "crypto-signals"
+      events: "Sinais de trading gerados"
+      topic: "notifications.send"
+
+    - service: "crypto-webhook"
+      events: "Eventos externos (TradingView, etc)"
+      topic: "notifications.send"
+
+    - service: "crypto-management"
+      events: "Alertas de gestão, configurações"
+      topic: "notifications.send"
+
+  produces_to:
+    - topic: "notifications.delivered"
+      status: "⏳ Futuro"
+      consumers: ["crypto-management (métricas)"]
+
+    - topic: "notifications.failed"
+      status: "⏳ Futuro"
+      consumers: ["crypto-management (alertas)"]
+
+# ============================================================================
+# METADATA
+# ============================================================================
+
+_metadata:
+  last_updated: "2025-11-28T00:00:00Z"
+  template_version: v3.0
+  updated_layers:
+    - infrastructure
+  updated_modules:
+    - infrastructure/api
+  notes: "Adicionado módulo api completo à camada infrastructure com endpoints, validação, async queue e error handling"
+
+# ============================================================================
+# END OF PROJECT MAP
+# ============================================================================

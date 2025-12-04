@@ -1474,3 +1474,983 @@ references:
 # ════════════════════════════════════════════════════════════════
 # FIM DO PROJECT MAP
 # ════════════════════════════════════════════════════════════════
+
+
+---
+project:
+  name: crypto-trader
+  language: Rust
+  edition: "2021"
+  architecture_style: "Hexagonal (Ports & Adapters) + Event Sourcing + CQRS"
+  description: |
+    Cryptocurrency trading system implementing hexagonal architecture with Event Sourcing and CQRS patterns.
+    Manages order lifecycle, stop-loss/take-profit strategies, risk management, and real-time market data processing.
+    Integrates with Binance exchange via adapters and uses Kafka for event streaming and PostgreSQL for event persistence.
+
+  features:
+    default: []
+    optional: []
+
+  runtime: "Tokio async (full features)"
+  web_framework: "Axum 0.8.6 (optional)"
+  database: "PostgreSQL with SQLx (Event Store + Read Models)"
+  messaging: "Kafka (rdkafka) for event streaming and signals"
+  observability: "tracing + tracing-subscriber (structured JSON logs)"
+
+  documentation:
+    location: "docs/"
+    conventions:
+      - "All technical documentation files must be placed in the docs/ folder"
+      - "Use descriptive uppercase names with underscores (e.g., FEATURE_GUIDE.md)"
+      - "Each significant feature, migration, or architectural decision should have its own .md file"
+      - "Include date and version information in documentation when relevant"
+      - "Migration guides should follow pattern: {FEATURE}_MIGRATION.md"
+      - "Architecture decision records should follow pattern: ADR_{NUMBER}_{TITLE}.md"
+      - "How-to guides should follow pattern: HOWTO_{TOPIC}.md"
+
+naming_style: mixed
+
+application:
+  description: |
+    Application layer orchestrates use cases through services, defines hexagonal port contracts,
+    and provides DTOs for external communication. Implements CQRS with separate command handlers
+    (services) and query handlers. Manages event sourcing lifecycle and projections for read models.
+    No infrastructure dependencies - all external system interactions go through port abstractions.
+
+  naming_style: snake_case
+
+  modules:
+    - name: ports
+      path: src/application/ports
+      purpose: |
+        Port trait definitions implementing hexagonal architecture contracts.
+        Defines interfaces for all external system interactions including event store,
+        exchange communication, order publishing, risk management, and projections.
+
+      directories:
+        - path: ports/
+          purpose: "Port trait definitions"
+          files:
+            - event_store.rs
+            - projection_store.rs
+            - exchange_port.rs
+            - order_publisher_port.rs
+            - risk_manager_port.rs
+
+      key_types:
+        - name: EventStore
+          kind: trait
+          purpose: "Event persistence and retrieval contract for Event Sourcing"
+        - name: ProjectionStore
+          kind: trait
+          purpose: "Read model persistence for CQRS query side"
+        - name: ExchangePort
+          kind: trait
+          purpose: "Cryptocurrency exchange operations abstraction"
+        - name: OrderPublisherPort
+          kind: trait
+          purpose: "Order event publishing to Kafka"
+        - name: RiskManagerPort
+          kind: trait
+          purpose: "Risk validation and metrics calculation"
+
+      dependencies:
+        internal:
+          - shared
+        external:
+          - async_trait
+          - uuid
+          - serde_json
+
+    - name: dtos
+      path: src/application/dtos
+      purpose: |
+        Data Transfer Objects for API contracts, Kafka messages, and cross-layer communication.
+        Includes commands (write operations), responses, signal DTOs, and market price DTOs.
+
+      directories:
+        - path: dtos/
+          purpose: "Data Transfer Objects"
+          files:
+            - commands.rs
+            - responses.rs
+            - signal_dto.rs
+            - market_price_dto.rs
+
+      key_types:
+        - name: SignalDto
+          kind: struct
+          purpose: "Trading signal from external strategy services"
+        - name: MarketPriceDto
+          kind: struct
+          purpose: "Real-time market price updates"
+        - name: CreateOrderCommand
+          kind: struct
+          purpose: "Command to create new order"
+
+      dependencies:
+        internal:
+          - domain
+          - shared
+        external:
+          - serde
+          - chrono
+
+    - name: services
+      path: src/application/services
+      purpose: |
+        Application service orchestrators implementing use cases and business workflows.
+        Includes event sourcing services, order management, signal processing, stop-loss management,
+        projections, notifications, and temporal queries. Services coordinate domain logic
+        with infrastructure through ports.
+
+      directories:
+        - path: services/
+          purpose: "Application services and orchestrators"
+          files:
+            - order_service.rs
+            - order_event_sourcing_service.rs
+            - signal_processor.rs
+            - signal_message_handler.rs
+            - stop_service.rs
+            - price_update_handler.rs
+            - trailing_stop_price_handler.rs
+            - notification_service.rs
+            - snapshot_manager.rs
+            - orders_projection.rs
+            - event_streaming_service.rs
+            - temporal_query_service.rs
+
+      key_types:
+        - name: OrderService
+          kind: struct
+          purpose: "Order creation, cancellation, and lifecycle management"
+        - name: OrderEventSourcingService
+          kind: struct
+          purpose: "Event sourcing orchestration for order aggregates"
+        - name: SignalProcessor
+          kind: struct
+          purpose: "Processes trading signals and creates orders"
+        - name: StopService
+          kind: struct
+          purpose: "Manages stop-loss and take-profit orders"
+        - name: TrailingStopPriceHandler
+          kind: struct
+          purpose: "Adjusts trailing stops based on price movements"
+        - name: SnapshotManager
+          kind: struct
+          purpose: "Aggregate snapshot creation and management"
+        - name: OrdersProjection
+          kind: struct
+          purpose: "CQRS read model projection for orders"
+        - name: TemporalQueryService
+          kind: struct
+          purpose: "Time-travel queries on event store"
+
+      dependencies:
+        internal:
+          - ports
+          - dtos
+          - domain
+          - shared
+        external:
+          - tokio
+          - tracing
+          - uuid
+
+    - name: queries
+      path: src/application/queries
+      purpose: "Query handlers for read operations (CQRS query side)"
+
+      dependencies:
+        internal:
+          - ports
+          - dtos
+          - shared
+
+  conventions:
+    - "All ports are async traits with Send + Sync bounds"
+    - "Port methods return InfraResult<T> for infrastructure errors"
+    - "DTOs use serde Serialize/Deserialize for JSON and Kafka compatibility"
+    - "Services own Arc references to ports for shared async access"
+    - "Commands return ApplicationResult<T> or ApplicationError"
+    - "Event sourcing services handle aggregate persistence and replay"
+    - "Projection services subscribe to event streams and update read models"
+    - "Use structured logging (tracing) with contextual fields"
+
+  interactions:
+    - from: services
+      to: ports
+      method: direct_call
+      description: "Services invoke port methods to interact with external systems"
+    - from: services
+      to: domain
+      method: direct_call
+      description: "Services coordinate domain aggregates and entities"
+    - from: signal_message_handler
+      to: signal_processor
+      method: direct_call
+      description: "Kafka message handler delegates to signal processor"
+
+  glossary_refs:
+    - term: Event Sourcing
+      usage: "OrderEventSourcingService, SnapshotManager"
+      relevance: "Core architectural pattern for persisting state changes as events"
+    - term: CQRS
+      usage: "OrdersProjection, TemporalQueryService, queries module"
+      relevance: "Separates write operations (commands) from read operations (queries)"
+    - term: Aggregate
+      usage: "OrderEventSourcingService orchestrates aggregate persistence"
+      relevance: "DDD pattern ensuring consistency boundaries"
+    - term: Projection
+      usage: "OrdersProjection, ProjectionStore port"
+      relevance: "Read model derived from event stream"
+
+domain:
+  description: |
+    Domain layer contains pure business logic implementing DDD tactical patterns.
+    Includes event-sourced aggregates (OrderAggregate, PositionAggregate, StopLossAggregate),
+    domain entities, immutable value objects, domain events, and domain services.
+    Zero infrastructure dependencies - completely isolated from I/O concerns.
+
+  naming_style: mixed
+
+  modules:
+    - name: aggregates
+      path: src/domain/aggregates
+      purpose: |
+        Event-sourced aggregate roots implementing business invariants and emitting domain events.
+        Each aggregate ensures consistency within its boundary and maintains uncommitted event list
+        for event sourcing persistence.
+
+      directories:
+        - path: aggregates/
+          purpose: "Aggregate root implementations"
+          files:
+            - order_aggregate.rs
+            - position_aggregate.rs
+            - stop_loss_aggregate.rs
+
+      key_types:
+        - name: OrderAggregate
+          kind: struct
+          purpose: "Order lifecycle management with event sourcing"
+        - name: PositionAggregate
+          kind: struct
+          purpose: "Trading position state and P&L calculation"
+        - name: StopLossAggregate
+          kind: struct
+          purpose: "Stop-loss and take-profit order management"
+
+      dependencies:
+        internal:
+          - entities
+          - events
+          - value_objects
+          - errors
+        external:
+          - uuid
+          - chrono
+
+    - name: entities
+      path: src/domain/entities
+      purpose: |
+        Domain entities with identity and mutable state.
+        Encapsulate business rules and state transitions within their boundaries.
+
+      directories:
+        - path: entities/
+          purpose: "Entity implementations"
+          files:
+            - order.rs
+            - execution.rs
+            - stop.rs
+
+      key_types:
+        - name: Order
+          kind: struct
+          purpose: "Order entity with status, fills, and signal reference"
+        - name: Execution
+          kind: struct
+          purpose: "Trade execution record"
+        - name: Stop
+          kind: struct
+          purpose: "Stop-loss or take-profit configuration"
+        - name: SignalReference
+          kind: struct
+          purpose: "Links order to originating trading signal"
+
+      dependencies:
+        internal:
+          - value_objects
+          - errors
+        external:
+          - uuid
+          - chrono
+
+    - name: events
+      path: src/domain/events
+      purpose: |
+        Domain events representing state changes in aggregates.
+        Immutable records of business facts that have occurred.
+        Used for event sourcing, event streaming, and integration.
+
+      directories:
+        - path: events/
+          purpose: "Domain event definitions"
+          files:
+            - order_events.rs
+            - stop_events.rs
+            - position_events.rs
+
+      key_types:
+        - name: OrderEvent
+          kind: enum
+          purpose: "Union type of all order-related events"
+        - name: OrderCreated
+          kind: struct
+          purpose: "Event emitted when new order is created"
+        - name: OrderFilled
+          kind: struct
+          purpose: "Event emitted when order is fully filled"
+        - name: OrderPartiallyFilled
+          kind: struct
+          purpose: "Event emitted on partial fill"
+        - name: OrderCanceled
+          kind: struct
+          purpose: "Event emitted when order is cancelled"
+        - name: StopEvent
+          kind: enum
+          purpose: "Union type of stop-loss/take-profit events"
+        - name: PositionEvent
+          kind: enum
+          purpose: "Union type of position lifecycle events"
+
+      dependencies:
+        internal:
+          - value_objects
+        external:
+          - serde
+          - uuid
+          - chrono
+
+    - name: value_objects
+      path: src/domain/value_objects
+      purpose: |
+        Immutable value objects with structural equality.
+        Encapsulate validation logic and ensure type safety throughout the domain.
+
+      directories:
+        - path: value_objects/
+          purpose: "Value object implementations"
+          files:
+            - symbol.rs
+            - price.rs
+            - quantity.rs
+            - order_side.rs
+            - order_type.rs
+            - order_status.rs
+            - stop_type.rs
+            - time_in_force.rs
+            - order_id.rs
+
+      key_types:
+        - name: Symbol
+          kind: struct
+          purpose: "Trading pair symbol (e.g., BTCUSDT)"
+        - name: Price
+          kind: struct
+          purpose: "Validated price with precision"
+        - name: Quantity
+          kind: struct
+          purpose: "Validated quantity with minimum size checks"
+        - name: OrderSide
+          kind: enum
+          purpose: "Buy or Sell direction"
+        - name: OrderType
+          kind: enum
+          purpose: "Market, Limit, StopLoss, TakeProfit"
+        - name: OrderStatus
+          kind: enum
+          purpose: "Order lifecycle status"
+        - name: TimeInForce
+          kind: enum
+          purpose: "GoodTillCancel, ImmediateOrCancel, FillOrKill"
+
+      dependencies:
+        internal:
+          - errors
+        external:
+          - serde
+
+    - name: services
+      path: src/domain/services
+      purpose: |
+        Domain services implementing business logic that doesn't naturally fit within
+        a single entity or value object. Stateless operations coordinating multiple domain objects.
+
+      directories:
+        - path: services/
+          purpose: "Domain service implementations"
+          files:
+            - order_validator.rs
+            - risk_validator.rs
+            - position_calculator.rs
+            - pnl_calculator.rs
+            - commission_calculator.rs
+
+      key_types:
+        - name: OrderValidator
+          kind: struct
+          purpose: "Validates order business rules"
+        - name: RiskValidator
+          kind: struct
+          purpose: "Validates risk limits and exposure"
+        - name: PositionCalculator
+          kind: struct
+          purpose: "Calculates position sizes and exposure"
+        - name: PnLCalculator
+          kind: struct
+          purpose: "Calculates profit and loss"
+        - name: CommissionCalculator
+          kind: struct
+          purpose: "Calculates trading fees based on tier"
+
+      dependencies:
+        internal:
+          - entities
+          - value_objects
+          - errors
+        external: []
+
+    - name: repositories
+      path: src/domain/repositories
+      purpose: "Repository trait definitions (domain contracts, implemented in infrastructure)"
+
+      key_types:
+        - name: OrderRepository
+          kind: trait
+          purpose: "Order persistence contract"
+
+      dependencies:
+        internal:
+          - entities
+          - shared
+        external:
+          - async_trait
+
+    - name: errors
+      path: src/domain/errors.rs
+      purpose: "Domain-level error types representing business rule violations"
+
+      key_types:
+        - name: DomainError
+          kind: enum
+          purpose: "Domain validation and business rule errors"
+        - name: DomainResult
+          kind: type
+          purpose: "Result type alias for domain operations"
+
+      dependencies:
+        external:
+          - thiserror
+
+  conventions:
+    - "Domain layer has zero infrastructure dependencies"
+    - "All value objects validate invariants in constructors"
+    - "Aggregates emit events for state changes (Event Sourcing)"
+    - "Events are immutable and named in past tense (OrderCreated, not CreateOrder)"
+    - "Use thiserror for domain error definitions"
+    - "Domain services are stateless and use dependency injection"
+    - "Entities have unique identity (OrderId, UUID)"
+    - "Value objects have structural equality"
+
+  interactions:
+    - from: aggregates
+      to: entities
+      method: direct_call
+      description: "Aggregates compose and coordinate entities"
+    - from: aggregates
+      to: events
+      method: event
+      description: "Aggregates emit domain events on state changes"
+    - from: aggregates
+      to: value_objects
+      method: direct_call
+      description: "Aggregates use value objects for type safety"
+    - from: services
+      to: entities
+      method: direct_call
+      description: "Domain services coordinate multiple entities"
+
+  glossary_refs:
+    - term: Aggregate
+      usage: "OrderAggregate, PositionAggregate, StopLossAggregate"
+      relevance: "DDD pattern ensuring transactional consistency boundaries"
+    - term: Entity
+      usage: "Order, Execution, Stop entities"
+      relevance: "Objects with unique identity and lifecycle"
+    - term: Value Object
+      usage: "Symbol, Price, Quantity, OrderSide, OrderType"
+      relevance: "Immutable objects compared by value, not identity"
+    - term: Domain Event
+      usage: "OrderEvent, StopEvent, PositionEvent"
+      relevance: "Captures state changes as immutable facts"
+    - term: Invariant
+      usage: "Enforced in value object constructors and aggregate methods"
+      relevance: "Business rules that must always hold true"
+
+infrastructure:
+  description: |
+    Infrastructure layer implements adapters for external systems implementing application ports.
+    Includes Binance exchange integration, Kafka messaging, PostgreSQL event store and repositories,
+    application lifecycle management (bootstrap, startup, shutdown), retry policies, and configuration.
+    All I/O and framework-specific code lives here.
+
+  naming_style: snake_case
+
+  modules:
+    - name: adapters
+      path: src/infrastructure/adapters
+      purpose: |
+        Adapters implementing application ports for external systems.
+        Binance exchange adapter, Kafka order publisher, in-memory risk manager.
+        Includes retry decorators for resilience.
+
+      directories:
+        - path: adapters/
+          purpose: "External system adapters"
+          files:
+            - binance_adapter.rs
+            - binance_with_retry.rs
+            - kafka_publisher.rs
+            - risk_manager.rs
+
+      key_types:
+        - name: BinanceAdapter
+          kind: struct
+          purpose: "Implements ExchangePort for Binance API"
+        - name: BinanceAdapterWithRetry
+          kind: struct
+          purpose: "Retry decorator for BinanceAdapter"
+        - name: KafkaOrderPublisher
+          kind: struct
+          purpose: "Implements OrderPublisherPort via Kafka"
+        - name: InMemoryRiskManager
+          kind: struct
+          purpose: "Implements RiskManagerPort with in-memory state"
+
+      dependencies:
+        internal:
+          - ports
+          - domain
+          - shared
+          - retry
+        external:
+          - binance
+          - rdkafka
+          - tokio
+
+    - name: event_store
+      path: src/infrastructure/event_store
+      purpose: |
+        Event Store implementations for Event Sourcing persistence.
+        PostgreSQL-backed production implementation and in-memory for testing.
+        Supports snapshots, projections, and temporal queries.
+
+      directories:
+        - path: event_store/
+          purpose: "Event store implementations"
+          files:
+            - postgres_event_store.rs
+            - in_memory_event_store.rs
+
+      key_types:
+        - name: PostgresEventStore
+          kind: struct
+          purpose: "PostgreSQL event store with snapshots and projections"
+        - name: InMemoryEventStore
+          kind: struct
+          purpose: "In-memory event store for testing"
+
+      dependencies:
+        internal:
+          - ports
+          - shared
+        external:
+          - sqlx
+          - serde_json
+          - uuid
+
+    - name: messaging
+      path: src/infrastructure/messaging
+      purpose: |
+        Kafka messaging infrastructure including producers, consumers, and message handlers.
+        Implements signal consumption, price updates, and order event publishing.
+        Notification publishing for external systems.
+
+      directories:
+        - path: messaging/kafka/
+          purpose: "Kafka infrastructure components"
+          files:
+            - common.rs
+            - config.rs
+            - consumer.rs
+            - producer.rs
+            - handler.rs
+        - path: messaging/kafka/producers/
+          purpose: "Kafka producer implementations"
+          files:
+            - base_producer.rs
+            - batching_producer.rs
+        - path: messaging/kafka/consumers/
+          purpose: "Kafka consumer implementations"
+          files:
+            - base_consumer.rs
+        - path: messaging/
+          purpose: "Domain-specific messaging"
+          files:
+            - signal_consumer.rs
+            - price_consumer.rs
+            - notification_publisher.rs
+
+      key_types:
+        - name: SignalConsumer
+          kind: struct
+          purpose: "Consumes trading signals from Kafka"
+        - name: PriceConsumer
+          kind: struct
+          purpose: "Consumes real-time price updates"
+        - name: NotificationPublisher
+          kind: struct
+          purpose: "Publishes notifications to external systems"
+        - name: MessageHandler
+          kind: trait
+          purpose: "Generic Kafka message processing contract"
+
+      dependencies:
+        internal:
+          - ports
+          - application
+          - shared
+        external:
+          - rdkafka
+          - serde_json
+          - tokio
+
+    - name: repositories
+      path: src/infrastructure/repositories
+      purpose: |
+        Repository implementations for read models and legacy persistence.
+        Generic PostgreSQL repository base and order-specific implementation.
+
+      directories:
+        - path: repositories/
+          purpose: "Repository implementations"
+          files:
+            - base_repository.rs
+            - postgres_order_repository.rs
+
+      key_types:
+        - name: PostgresRepository
+          kind: struct
+          purpose: "Generic PostgreSQL repository base"
+        - name: PostgresOrderRepository
+          kind: struct
+          purpose: "Order read model repository"
+
+      dependencies:
+        internal:
+          - domain
+          - shared
+        external:
+          - sqlx
+
+    - name: bootstrap
+      path: src/infrastructure/bootstrap
+      purpose: |
+        Component initialization with retry logic, health checks, and graceful fallbacks.
+        Database connection pooling, Kafka consumer/producer setup, notification publisher init.
+
+      directories:
+        - path: bootstrap/
+          purpose: "Component bootstrapping"
+          files:
+            - database.rs
+            - kafka.rs
+            - notification.rs
+
+      key_types:
+        - name: init_database_pool
+          kind: function
+          purpose: "Initialize PostgreSQL connection pool with retry"
+        - name: init_signal_consumer
+          kind: function
+          purpose: "Bootstrap signal consumer"
+        - name: init_order_publisher
+          kind: function
+          purpose: "Bootstrap order event publisher"
+
+      dependencies:
+        internal:
+          - config
+          - messaging
+          - retry
+        external:
+          - sqlx
+          - rdkafka
+
+    - name: startup
+      path: src/infrastructure/startup
+      purpose: |
+        Application startup orchestration including logging initialization,
+        health check aggregation, and user-friendly startup banner.
+
+      directories:
+        - path: startup/
+          purpose: "Startup orchestration"
+          files:
+            - logging.rs
+            - banner.rs
+            - health.rs
+
+      dependencies:
+        internal:
+          - config
+        external:
+          - tracing
+          - tracing_subscriber
+
+    - name: shutdown
+      path: src/infrastructure/shutdown
+      purpose: |
+        Graceful shutdown coordination handling OS signals (SIGTERM, SIGINT)
+        and sequential resource cleanup with timeouts.
+
+      directories:
+        - path: shutdown/
+          purpose: "Shutdown coordination"
+          files:
+            - signal_handler.rs
+            - graceful.rs
+
+      dependencies:
+        external:
+          - tokio
+          - tracing
+
+    - name: config
+      path: src/infrastructure/config
+      purpose: "Application configuration management with environment variable support"
+
+      directories:
+        - path: config/
+          purpose: "Configuration management"
+          files:
+            - settings.rs
+
+      key_types:
+        - name: Settings
+          kind: struct
+          purpose: "Application configuration with env overrides"
+
+      dependencies:
+        external:
+          - config
+          - serde
+
+    - name: retry
+      path: src/infrastructure/retry
+      purpose: "Retry policies with exponential backoff for resilient external system calls"
+
+      directories:
+        - path: retry/
+          purpose: "Retry mechanisms"
+          files:
+            - retry_policy.rs
+            - exponential_backoff.rs
+
+      dependencies:
+        internal:
+          - shared
+        external:
+          - tokio
+
+  conventions:
+    - "All infrastructure types implement application ports (traits)"
+    - "Use Arc<Self> for shared ownership across async tasks"
+    - "Graceful shutdown hooks via shutdown() method on ports"
+    - "Health checks return InfraResult for readiness probes"
+    - "Generic Kafka producers/consumers use type parameters for message types"
+    - "Pluggable serialization via MessageSerializer/MessageDeserializer traits"
+    - "Bootstrap modules handle all initialization with retry logic"
+    - "Startup modules provide observability and user feedback"
+    - "Shutdown modules ensure graceful resource cleanup"
+
+  patterns:
+    - pattern: Adapter Pattern
+      usage: "Infrastructure types adapt external systems to port interfaces"
+    - pattern: Decorator Pattern
+      usage: "BinanceAdapterWithRetry decorates BinanceAdapter with retry logic"
+    - pattern: Repository Pattern
+      usage: "PostgresOrderRepository abstracts data access"
+    - pattern: Builder Pattern
+      usage: "Fluent component initialization in bootstrap modules"
+
+  interactions:
+    - from: adapters
+      to: ports
+      method: direct_call
+      description: "Adapters implement port traits defined in application layer"
+    - from: messaging
+      to: application
+      method: kafka
+      description: "Kafka consumers invoke application service handlers"
+    - from: event_store
+      to: database
+      method: db
+      description: "Event store persists to PostgreSQL"
+    - from: repositories
+      to: database
+      method: db
+      description: "Repositories query read models from PostgreSQL"
+
+  glossary_refs:
+    - term: Adapter
+      usage: "BinanceAdapter, KafkaOrderPublisher"
+      relevance: "Hexagonal architecture adapters for external systems"
+    - term: Event Store
+      usage: "PostgresEventStore, InMemoryEventStore"
+      relevance: "Persistence mechanism for Event Sourcing"
+    - term: Retry Policy
+      usage: "BinanceAdapterWithRetry, exponential_backoff"
+      relevance: "Resilience pattern for transient failures"
+
+shared:
+  description: |
+    Shared layer contains cross-cutting concerns used across all layers.
+    Common error types (DomainError, ApplicationError, InfrastructureError),
+    event sourcing types (EventEnvelope, EventMetadata), utility functions,
+    and shared traits. Minimal by design.
+
+  naming_style: snake_case
+
+  modules:
+    - name: errors
+      path: src/shared/errors.rs
+      purpose: |
+        Common error type hierarchy for all layers with automatic conversions.
+        ApplicationError, InfrastructureError, and result type aliases.
+
+      key_types:
+        - name: ApplicationError
+          kind: enum
+          purpose: "Application-level errors with domain and infra wrapping"
+        - name: InfrastructureError
+          kind: enum
+          purpose: "Infrastructure I/O and external system errors"
+        - name: ApplicationResult
+          kind: type
+          purpose: "Result alias for application operations"
+        - name: InfraResult
+          kind: type
+          purpose: "Result alias for infrastructure operations"
+
+      dependencies:
+        internal:
+          - domain
+        external:
+          - thiserror
+
+    - name: types
+      path: src/shared/types.rs
+      purpose: "Common type aliases and event sourcing support types"
+
+      key_types:
+        - name: EventEnvelope
+          kind: struct
+          purpose: "Event wrapper with metadata and sequence number"
+        - name: EventMetadata
+          kind: struct
+          purpose: "Correlation, causation, and user context"
+        - name: EventVersion
+          kind: type
+          purpose: "Event version number for optimistic concurrency"
+
+      dependencies:
+        external:
+          - uuid
+          - chrono
+          - serde
+
+    - name: utils
+      path: src/shared/utils
+      purpose: "Utility functions for datetime handling and validation"
+
+      directories:
+        - path: utils/
+          purpose: "Utility functions"
+          files:
+            - datetime.rs
+            - validation.rs
+
+      dependencies:
+        external:
+          - chrono
+
+    - name: traits
+      path: src/shared/traits
+      purpose: "Common trait definitions"
+
+      dependencies: []
+
+  conventions:
+    - "Keep shared layer minimal - only truly cross-cutting concerns"
+    - "No business logic in shared layer"
+    - "Error types provide helper constructors"
+    - "Use thiserror for error definitions"
+
+best_practices:
+  - category: architecture
+    note: "Hexagonal architecture with explicit ports and adapters maintains clean separation"
+    priority: high
+
+  - category: event_sourcing
+    note: "Event sourcing provides audit trail, temporal queries, and rebuild capability"
+    priority: high
+
+  - category: cqrs
+    note: "CQRS separates write models (aggregates) from read models (projections)"
+    priority: high
+
+  - category: resilience
+    note: "Retry policies with exponential backoff handle transient failures"
+    priority: high
+
+  - category: configuration
+    note: "Multiple Kafka topics/producers/consumers supported via Settings HashMap"
+    priority: medium
+
+  - category: observability
+    note: "Structured logging with tracing provides rich debugging context"
+    priority: high
+
+  - category: testing
+    note: "InMemoryEventStore enables testing without database dependencies"
+    priority: medium
+
+quality:
+  test_coverage: unknown
+  cyclomatic_complexity: medium
+  coupling: low
+  cohesion: high
+
+_metadata:
+  last_updated: "2025-11-28T00:00:00Z"
+  template_version: v3.0
+  updated_layers:
+    - application
+    - domain
+    - infrastructure
+    - shared
+

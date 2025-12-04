@@ -1718,3 +1718,1635 @@ references:
 # ════════════════════════════════════════════════════════════════
 # FIM DO PROJECT MAP
 # ════════════════════════════════════════════════════════════════
+
+
+# ============================================================
+# CRYPTO-SIGNALS PROJECT MAP v4.1
+# Last Updated: 2025-11-29
+# Template Version: v4.1
+# ============================================================
+
+# ============================================================
+# SEÇÃO 1: VISÃO GERAL DO PROJETO
+# ============================================================
+overview:
+  name: crypto-signals
+  version: "1.0.0"
+  description: |
+    Crypto-signals é um microserviço especializado em análise técnica de criptomoedas
+    e geração de sinais de trading em tempo real. Faz parte de um ecossistema maior
+    de trading automatizado, atuando como o "cérebro analítico" que processa dados
+    de mercado e gera sinais acionáveis.
+    
+    O serviço consome preços em tempo real via Kafka, constrói candles em múltiplos
+    timeframes, calcula indicadores técnicos e executa estratégias de análise para
+    gerar sinais de compra/venda com níveis de confiança calculados.
+
+  business_domain: FinTech - Cryptocurrency Trading Automation
+  team_size: 1
+  maturity: development
+
+  key_stakeholders:
+    - role: Tech Lead
+      responsibilities: "Arquitetura, implementação e manutenção do sistema"
+
+  core_capabilities:
+    - capability: "Real-time market data processing"
+      status: production
+      criticality: high
+      description: "Consome e processa preços de mercado em tempo real"
+
+    - capability: "Multi-timeframe candle construction"
+      status: production
+      criticality: high
+      description: "Constrói candles OHLCV em 6 timeframes (1m, 5m, 15m, 1h, 4h, 1d)"
+
+    - capability: "Technical indicator calculation"
+      status: production
+      criticality: high
+      description: "Calcula RSI, MACD, SMA, EMA e outros indicadores"
+
+    - capability: "Strategy-based signal generation"
+      status: development
+      criticality: high
+      description: "Sistema plugin-based de estratégias de trading"
+
+    - capability: "Signal confidence calculation"
+      status: development
+      criticality: medium
+      description: "Calcula níveis de confiança baseado em confluências"
+
+    - capability: "Signal filtering and validation"
+      status: development
+      criticality: medium
+      description: "Filtra sinais baseado em critérios configuráveis"
+
+# ============================================================
+# SEÇÃO 2: ARQUITETURA DE CAMADAS
+# ============================================================
+architecture:
+  style: hexagonal
+
+  layers_hierarchy:
+    - name: domain
+      level: 5
+      purpose: "Lógica de negócio pura com zero dependências externas"
+      dependencies_allowed: []
+
+    - name: application
+      level: 4
+      purpose: "Orquestração de casos de uso e definição de portas"
+      dependencies_allowed: [domain]
+
+    - name: infrastructure
+      level: 3
+      purpose: "Implementações de adaptadores para sistemas externos"
+      dependencies_allowed: [domain, application]
+
+    - name: shared
+      level: 1
+      purpose: "Utilitários e tipos cross-cutting"
+      dependencies_allowed: []
+
+  dependency_rules:
+    - "Domain layer NUNCA depende de infrastructure ou application"
+    - "Application layer define ports (traits) mas NÃO os implementa"
+    - "Infrastructure layer implementa ports do application layer"
+    - "Shared layer não contém lógica de negócio"
+    - "Fluxo de dependência: Infrastructure → Application → Domain"
+
+  layer_diagram: |
+    ┌─────────────────────────────────────────────────────┐
+    │   Main (Bootstrap & Wiring)                        │
+    ├─────────────────────────────────────────────────────┤
+    │   Infrastructure (Adapters)                        │
+    │   - Kafka Consumers/Producers                      │
+    │   - PostgreSQL Repositories                        │
+    │   - Technical Indicators                           │
+    │   - Configuration & Startup                        │
+    ├─────────────────────────────────────────────────────┤
+    │   Application (Use Cases & Ports)                  │
+    │   - Strategy Orchestration                         │
+    │   - Signal Processing                              │
+    │   - Port Definitions (Traits)                      │
+    ├─────────────────────────────────────────────────────┤
+    │   Domain (Business Logic)                          │
+    │   - Entities: Candle, Signal, Tick                 │
+    │   - Value Objects: Price, Symbol, Confidence       │
+    │   - Domain Services: CandleBuilder, Validators     │
+    │   - Domain Events                                  │
+    └─────────────────────────────────────────────────────┘
+
+# ============================================================
+# SEÇÃO 3: FLUXOS DE NEGÓCIO
+# ============================================================
+business_flows:
+  - name: "Real-time Signal Generation"
+    trigger: "Kafka message on market.prices topic"
+    actors:
+      - type: system
+        name: crypto-listener
+        description: "Publica preços de mercado"
+      - type: system
+        name: crypto-signals
+        description: "Processa e gera sinais"
+      - type: system
+        name: crypto-trader
+        description: "Consome sinais"
+
+    steps:
+      - step: 1
+        layer: infrastructure
+        action: "Recebe mensagem de preço do Kafka"
+        module: messaging::kafka::consumers::price_consumer
+
+      - step: 2
+        layer: domain
+        action: "Cria entidade Tick"
+        module: domain::entities::tick
+
+      - step: 3
+        layer: domain
+        action: "Atualiza candles em múltiplos timeframes"
+        module: domain::services::candle_builder
+
+      - step: 4
+        layer: domain
+        action: "Emite evento CandleCompleted quando candle fecha"
+        module: domain::events::candle_events
+
+      - step: 5
+        layer: infrastructure
+        action: "Calcula indicadores técnicos (RSI, MACD, etc)"
+        module: infrastructure::indicators
+
+      - step: 6
+        layer: application
+        action: "Executa estratégias habilitadas"
+        module: application::strategies
+
+      - step: 7
+        layer: domain
+        action: "Cria entidade Signal com confidence calculado"
+        module: domain::entities::signal
+
+      - step: 8
+        layer: infrastructure
+        action: "Publica sinal no Kafka"
+        module: messaging::kafka::producers::signal_publisher
+
+    integration_points:
+      - service: "crypto-listener"
+        protocol: kafka
+        topic: "market.prices"
+        when: "Continuamente"
+
+      - service: "crypto-trader"
+        protocol: kafka
+        topics: ["signal.buy", "signal.sell"]
+        when: "Quando sinal é gerado"
+
+    error_scenarios:
+      - scenario: "Preço inválido recebido"
+        handler: "Log warning, descarta mensagem, continua processamento"
+
+      - scenario: "Falha ao calcular indicador"
+        handler: "Log error, pula estratégias dependentes, continua com outras"
+
+      - scenario: "Kafka producer indisponível"
+        handler: "Buffer com retry exponencial, alerta após 5 tentativas"
+
+  - name: "Candle Persistence"
+    trigger: "CandleCompleted event emitido"
+    actors:
+      - type: system
+        name: crypto-signals
+
+    steps:
+      - step: 1
+        layer: application
+        action: "Event handler recebe CandleCompleted"
+        module: application::handlers::candle_handler
+
+      - step: 2
+        layer: application
+        action: "Chama CandleRepository port"
+        module: application::ports::candle_repository
+
+      - step: 3
+        layer: infrastructure
+        action: "Persiste candle no PostgreSQL"
+        module: infrastructure::repositories
+
+    error_scenarios:
+      - scenario: "Database indisponível"
+        handler: "Log error, continua processamento (persistência não é crítica)"
+
+# ============================================================
+# SEÇÃO 4: MAPA DE APIs E CONTRATOS
+# ============================================================
+api_contracts:
+  rest_endpoints: []
+  # Crypto-signals é puramente event-driven, sem REST API
+
+  events_consumed:
+    - topic: market.prices
+      schema_version: v1
+      payload_example: |
+        {
+          "symbol": "BTCUSDT",
+          "price": 42500.50,
+          "volume": 1.234,
+          "timestamp": "2025-11-29T10:30:00Z"
+        }
+      handler_module: infrastructure::messaging::kafka::consumers::price_consumer
+      consumer_group: crypto-signals
+
+  events_published:
+    - topic: signal.buy
+      schema_version: v1
+      schema_registry: yes
+      schema_file: schemas/crypto_trading_signal_buy.avsc
+      payload_example: |
+        {
+          "id": "uuid-v4",
+          "symbol": "BTCUSDT",
+          "side": "BUY",
+          "strategy": "RSI_DIVERGENCE",
+          "source": "internal",
+          "confidence": 0.85,
+          "target_price": 42500.0,
+          "stop_loss": 41000.0,
+          "take_profit": 45000.0,
+          "metadata": {
+            "timeframe": "15m",
+            "indicators": { "rsi": 28.5 },
+            "signal_strength": 85
+          },
+          "timestamp": "2025-11-29T10:30:00Z"
+        }
+      consumers: [crypto-trader]
+
+    - topic: signal.sell
+      schema_version: v1
+      schema_registry: yes
+      schema_file: schemas/crypto_trading_signal_sell.avsc
+      consumers: [crypto-trader]
+
+# ============================================================
+# SEÇÃO 5: DEPLOYMENT E AMBIENTES
+# ============================================================
+deployment:
+  environments:
+    - name: development
+      url: localhost
+      deployment_method: docker-compose
+      replicas: 1
+      config_file: docker-compose.dev.yml
+
+    - name: production
+      deployment_method: docker
+      replicas: 1
+      config_file: docker-compose.yml
+
+  infrastructure:
+    database:
+      type: PostgreSQL
+      version: "15+"
+      connection_pool: 10
+      usage: "Persistência de candles e sinais (opcional)"
+      required: no
+      fallback: "Sistema continua funcionando sem DB"
+
+    message_broker:
+      type: Kafka
+      version: "3.4+"
+      required: yes
+      topics:
+        - market.prices (consumed)
+        - signal.buy (produced)
+        - signal.sell (produced)
+      partitions_per_topic: 3
+      replication_factor: 1
+
+    schema_registry:
+      type: Confluent Schema Registry
+      version: "7.0+"
+      usage: "Validação de schemas Avro para sinais"
+
+  external_dependencies:
+    - name: crypto-listener
+      purpose: "Fornece preços de mercado em tempo real"
+      criticality: high
+      fallback: "Sistema fica idle aguardando mensagens"
+
+# ============================================================
+# SEÇÃO 6: PROJETO - INFORMAÇÕES TÉCNICAS
+# ============================================================
+project:
+  name: crypto-signals
+  language: Rust
+  edition: "2021"
+  architecture_style: "Hexagonal (Ports & Adapters) + Event-Driven"
+
+  features:
+    default: []
+    optional: []
+
+  runtime: "Tokio async (full features)"
+  web_framework: "Axum 0.8.6 (opcional, não utilizado atualmente)"
+  database: "PostgreSQL with SQLx (opcional)"
+  messaging: "Kafka (rdkafka)"
+  observability: "tracing + tracing-subscriber (structured JSON logs)"
+
+  documentation:
+    location: "docs/"
+    conventions:
+      - "All technical documentation files must be placed in the docs/ folder"
+      - "Use descriptive uppercase names with underscores (e.g., FEATURE_GUIDE.md)"
+      - "Each significant feature, migration, or architectural decision should have its own .md file"
+      - "Include date and version information in documentation when relevant"
+      - "Migration guides should follow pattern: {FEATURE}_MIGRATION.md"
+      - "Architecture decision records should follow pattern: ADR_{NUMBER}_{TITLE}.md"
+      - "How-to guides should follow pattern: HOWTO_{TOPIC}.md"
+
+naming_style: snake_case
+
+application:
+  description: |
+    Application layer orchestrates use cases, defines port contracts (traits),
+    and provides DTOs for cross-layer communication. This layer is pure business
+    logic coordination without infrastructure knowledge.
+
+  naming_style: snake_case
+
+  modules:
+    - name: ports
+      path: src/application/ports
+      purpose: "Port trait definitions (hexagonal architecture contracts)"
+
+      key_files:
+        - event_store.rs: "Generic event store interface"
+        - projection_store.rs: "Generic projection store interface"
+
+    - name: dtos
+      path: src/application/dtos
+      purpose: "Data Transfer Objects for API contracts and layer boundaries"
+      note: "Add your domain-specific DTOs here"
+
+    - name: services
+      path: src/application/services
+      purpose: "Application service orchestrators for use cases"
+
+    - name: queries
+      path: src/application/queries
+      purpose: "Query handlers for read operations (CQRS pattern)"
+
+  conventions:
+    - "All ports are async traits with Send + Sync bounds"
+    - "Port methods return InfraResult<T> for infrastructure errors"
+    - "DTOs use serde Serialize/Deserialize for JSON compatibility"
+
+domain:
+  description: |
+    Domain layer contains pure business logic, aggregates, entities, value objects,
+    and domain events. No infrastructure dependencies.
+
+  naming_style: snake_case
+
+  modules:
+    - name: aggregates
+      path: src/domain/aggregates
+      purpose: "Domain aggregates (aggregate roots)"
+
+    - name: entities
+      path: src/domain/entities
+      purpose: "Domain entities"
+
+    - name: events
+      path: src/domain/events
+      purpose: "Domain events"
+
+    - name: value_objects
+      path: src/domain/value_objects
+      purpose: "Immutable value objects"
+
+    - name: repositories
+      path: src/domain/repositories
+      purpose: "Repository interface definitions"
+
+    - name: errors
+      path: src/domain/errors.rs
+      purpose: "Domain-level error types"
+
+  conventions:
+    - "Domain layer has zero infrastructure dependencies"
+    - "Use thiserror for domain error definitions"
+
+infrastructure:
+  description: |
+    Infrastructure layer implements adapters for external systems (Kafka, PostgreSQL, HTTP).
+    Contains all I/O and framework-specific code. Provides bootstrap, startup, and shutdown
+    modules for application lifecycle management.
+    
+    Esta camada é responsável por toda a comunicação com o mundo externo: bancos de dados,
+    brokers de mensagens, APIs externas, filesystem, etc. Implementa as portas (traits)
+    definidas na camada de application.
+
+  naming_style: snake_case
+
+  maturity_level: development
+
+  ownership:
+    team: "Core Team"
+    documentation: "docs/ARCHITECTURE.md"
+
+  modules:
+    - name: bootstrap
+      path: src/infrastructure/bootstrap
+      purpose: "Component initialization with retry logic and fallbacks"
+      complexity_score: 6
+      test_coverage: "0%"
+
+      key_files:
+        - database.rs: "PostgreSQL connection bootstrapping with retry"
+
+      directories:
+        - path: .
+          purpose: "Initialize critical infrastructure components"
+          files:
+            - mod.rs
+            - database.rs
+
+      key_types:
+        - name: DatabaseBootstrap
+          kind: struct
+          purpose: "Handles database connection with retry logic and graceful degradation"
+          visibility: public
+          methods:
+            - "connect(max_attempts, retry_delay) -> Option<PgPool>"
+
+      dependencies:
+        internal:
+          - infrastructure::config
+        external:
+          - sqlx
+          - tokio
+          - tracing
+
+      performance_notes:
+        - "Usa retry exponencial com até N tentativas configuráveis"
+        - "Não bloqueia startup se DB estiver indisponível"
+
+      conventions:
+        - "Todos os bootstrappers retornam Option<T> para permitir degradação"
+        - "Logging estruturado para observabilidade de inicialização"
+        - "Retry delay configurável via parâmetros"
+
+    - name: startup
+      path: src/infrastructure/startup
+      purpose: "Application startup configuration and logging"
+      complexity_score: 4
+      test_coverage: "0%"
+
+      key_files:
+        - logging.rs: "Structured logging initialization"
+        - banner.rs: "Startup banner with health status"
+        - health.rs: "Health check aggregation"
+
+      directories:
+        - path: .
+          purpose: "Configure application startup and observability"
+          files:
+            - mod.rs
+            - logging.rs
+            - banner.rs
+            - health.rs
+
+      key_types:
+        - name: LoggingConfig
+          kind: struct
+          purpose: "Configure tracing subscriber with JSON output"
+          visibility: public
+
+      dependencies:
+        internal: []
+        external:
+          - tracing
+          - tracing-subscriber
+
+    - name: shutdown
+      path: src/infrastructure/shutdown
+      purpose: "Graceful shutdown coordination"
+      complexity_score: 7
+      test_coverage: "0%"
+
+      key_files:
+        - signal_handler.rs: "OS signal handling (SIGTERM, SIGINT)"
+        - graceful.rs: "Sequential shutdown with timeouts"
+
+      directories:
+        - path: .
+          purpose: "Handle graceful shutdown with resource cleanup"
+          files:
+            - mod.rs
+            - signal_handler.rs
+            - graceful.rs
+
+      key_types:
+        - name: ShutdownCoordinator
+          kind: struct
+          purpose: "Coordinates sequential shutdown of components"
+          visibility: public
+
+      dependencies:
+        internal: []
+        external:
+          - tokio
+          - tracing
+
+      performance_notes:
+        - "Shutdown timeout configurável por componente"
+        - "Execução sequencial para garantir ordem correta"
+
+    - name: messaging
+      path: src/infrastructure/messaging
+      purpose: "Kafka infrastructure (producers, consumers, serialization)"
+      complexity_score: 9
+      test_coverage: "0%"
+
+      subdirectories:
+        - kafka/producers/: "Generic Kafka producers with batching support"
+        - kafka/consumers/: "Generic Kafka consumers with error handling"
+        - kafka/common.rs: "Serialization traits and common types"
+        - kafka/config.rs: "Kafka configuration builders"
+
+      key_types:
+        - name: BaseProducer<T>
+          kind: struct
+          purpose: "Generic Kafka producer with retry and error handling"
+          visibility: public
+
+        - name: BatchingProducer<T>
+          kind: struct
+          purpose: "Producer with automatic batching for high-throughput scenarios"
+          visibility: public
+
+        - name: BaseConsumer<T>
+          kind: struct
+          purpose: "Generic Kafka consumer with deserialization"
+          visibility: public
+
+      dependencies:
+        internal:
+          - infrastructure::config
+          - application::ports
+        external:
+          - rdkafka
+          - tokio
+          - serde
+          - serde_json
+
+      performance_notes:
+        - "BatchingProducer buffers até 1000 mensagens ou 100ms (configurável)"
+        - "Consumer usa commit manual para at-least-once semantics"
+        - "Backpressure implementado via channel bounded"
+
+    - name: repositories
+      path: src/infrastructure/repositories
+      purpose: |
+        Repository implementations for data persistence following hexagonal architecture.
+        Provides base repository trait and PostgreSQL-based implementations.
+        Currently contains generic base repository that can be specialized for domain entities.
+
+      complexity_score: 5
+      test_coverage: "0%"
+      maturity: experimental
+
+      directories:
+        - path: .
+          purpose: "Generic repository pattern implementation"
+          files:
+            - mod.rs
+            - base_repository.rs
+
+      key_files:
+        - base_repository.rs: |
+            Generic repository trait with CRUD operations and PostgreSQL base implementation.
+            Designed to be implemented for specific domain entities (Candle, Signal).
+
+      key_types:
+        - name: Repository<T>
+          kind: trait
+          purpose: "Generic CRUD interface for any entity type"
+          visibility: public
+          methods:
+            - "find_by_id(&self, id: &str) -> InfraResult<Option<T>>"
+            - "find_all(&self) -> InfraResult<Vec<T>>"
+            - "save(&self, entity: &T) -> InfraResult<()>"
+            - "update(&self, entity: &T) -> InfraResult<()>"
+            - "delete(&self, id: &str) -> InfraResult<()>"
+          notes: "All methods are async with Send + Sync bounds"
+
+        - name: PostgresRepository
+          kind: struct
+          purpose: "Base PostgreSQL repository with connection pool"
+          visibility: public
+          methods:
+            - "new(pool: PgPool) -> Self"
+            - "pool(&self) -> &PgPool"
+          notes: "Should be specialized via impl Repository<Entity> blocks"
+
+      dependencies:
+        internal:
+          - shared::errors::InfraResult
+          - application::ports::candle_repository
+          - application::ports::signal_repository
+        external:
+          - sqlx (PgPool)
+          - async-trait
+
+      conventions:
+        - "All repository methods return InfraResult<T> for error handling"
+        - "Use async_trait for trait methods"
+        - "Repository implementations should be stateless except for pool reference"
+        - "Entity-specific queries should be in dedicated impl blocks"
+
+      notes:
+        - "📋 TODO: Implementar CandleRepositoryImpl : CandleRepository"
+        - "📋 TODO: Implementar SignalRepositoryImpl : SignalRepository"
+        - "🏗️ Arquitetura: Base repository fornece infraestrutura comum"
+        - "🏗️ Arquitetura: Especializações implementam domain-specific queries"
+        - "⚠️ Risco: Atualmente sem implementações concretas para entidades de domínio"
+        - "🔄 Evolução: Migrar de trait genérico para traits específicos por agregado"
+
+      integration_points:
+        - layer: application
+          ports: [CandleRepository, SignalRepository]
+          description: "Implementa ports definidos na application layer"
+
+        - layer: domain
+          entities: [Candle, Signal]
+          description: "Persiste e recupera entidades de domínio"
+
+    - name: config
+      path: src/infrastructure/config
+      purpose: "Configuration management with environment variable support"
+      complexity_score: 5
+      test_coverage: "0%"
+
+      key_files:
+        - settings.rs: "Application settings with Kafka, DB, and market config"
+
+      key_types:
+        - name: Settings
+          kind: struct
+          purpose: "Root configuration structure"
+          visibility: public
+
+        - name: KafkaSettings
+          kind: struct
+          purpose: "Kafka broker and topic configuration"
+          visibility: public
+
+        - name: DatabaseSettings
+          kind: struct
+          purpose: "Database connection configuration"
+          visibility: public
+
+      dependencies:
+        internal: []
+        external:
+          - serde
+          - config
+          - dotenvy
+
+    - name: event_store
+      path: src/infrastructure/event_store
+      purpose: "Event store implementations for event sourcing"
+      complexity_score: 6
+      test_coverage: "0%"
+
+      key_files:
+        - in_memory_event_store.rs: "In-memory event store for testing"
+
+      key_types:
+        - name: InMemoryEventStore
+          kind: struct
+          purpose: "Thread-safe in-memory event store for development/testing"
+          visibility: public
+
+      dependencies:
+        internal:
+          - application::ports::event_store
+        external:
+          - parking_lot
+          - async-trait
+
+      notes:
+        - "📋 TODO: Implementar PostgresEventStore para produção"
+
+    - name: indicators
+      path: src/infrastructure/indicators
+      purpose: "Technical indicator calculations (RSI, MACD, SMA, EMA)"
+      complexity_score: 7
+      test_coverage: "0%"
+
+      key_files:
+        - rsi.rs: "Relative Strength Index calculator"
+        - macd.rs: "Moving Average Convergence Divergence"
+        - sma.rs: "Simple Moving Average"
+        - ema.rs: "Exponential Moving Average"
+
+      key_types:
+        - name: RSI
+          kind: struct
+          purpose: "Calculate RSI indicator from price data"
+          visibility: public
+
+        - name: MACD
+          kind: struct
+          purpose: "Calculate MACD line, signal line, and histogram"
+          visibility: public
+
+      dependencies:
+        internal:
+          - domain::entities::candle
+          - domain::value_objects::price
+        external: []
+
+      performance_notes:
+        - "Indicadores calculados incrementalmente quando possível"
+        - "Cache de valores intermediários para performance"
+
+  conventions:
+    - "All infrastructure types implement application ports (traits)"
+    - "Use Arc<Self> for shared ownership across async tasks"
+    - "Graceful shutdown hooks via shutdown() method on ports"
+    - "Health checks return InfraResult for readiness probes"
+    - "Generic Kafka producers/consumers use type parameters for message types"
+    - "Pluggable serialization via MessageSerializer/MessageDeserializer traits"
+    - "Bootstrap modules handle all initialization with retry logic"
+    - "Startup modules provide observability and user feedback"
+    - "Shutdown modules ensure graceful resource cleanup"
+    - "Repository pattern: generic base + domain-specific implementations"
+
+  patterns:
+    - pattern: Adapter Pattern
+      usage: "Infrastructure types adapt external systems to port interfaces"
+      examples: [PostgresRepository, KafkaProducer]
+
+    - pattern: Decorator Pattern
+      usage: "Batching decorator adds buffering logic for high-throughput scenarios"
+      examples: [BatchingProducer]
+
+    - pattern: Generic Programming
+      usage: "Type-safe Kafka producers/consumers for any message type"
+      examples: [BaseProducer<T>, BaseConsumer<T>]
+
+    - pattern: Builder Pattern
+      usage: "Fluent component initialization in bootstrap modules"
+      examples: [DatabaseBootstrap::connect()]
+
+    - pattern: Repository Pattern
+      usage: "Abstract data access behind trait interfaces"
+      examples: [Repository<T>, PostgresRepository]
+
+  interactions:
+    - from: repositories
+      to: application::ports::candle_repository
+      method: trait_implementation
+      description: "Implementa CandleRepository port com PostgreSQL"
+      frequency: on-demand
+      data_volume: medium
+
+    - from: repositories
+      to: application::ports::signal_repository
+      method: trait_implementation
+      description: "Implementa SignalRepository port com PostgreSQL"
+      frequency: on-demand
+      data_volume: medium
+
+    - from: messaging::kafka::consumers
+      to: application::ports::price_consumer
+      method: trait_implementation
+      description: "Implementa price consumer port"
+      frequency: real-time
+      data_volume: high
+
+    - from: messaging::kafka::producers
+      to: application::ports::signal_publisher
+      method: trait_implementation
+      description: "Implementa signal publisher port"
+      frequency: on-demand
+      data_volume: medium
+
+    - from: bootstrap::database
+      to: repositories
+      method: direct_call
+      description: "Fornece PgPool para repositories"
+      frequency: startup
+      data_volume: low
+
+shared:
+  description: |
+    Shared layer contains common utilities, traits, types, and error definitions
+    used across all layers.
+
+  modules:
+    - errors.rs: "Common error types (InfraError, DomainError)"
+    - types.rs: "Common type aliases"
+    - traits/: "Common trait definitions"
+    - utils/: "Utility functions"
+
+  conventions:
+    - "Keep shared layer minimal"
+    - "Only truly cross-cutting concerns belong here"
+
+# ============================================================
+# SEÇÃO 11: MAPA DE DADOS E MODELOS
+# ============================================================
+data_model:
+  persistence_strategy: hybrid  # Event sourcing para auditoria + CRUD para queries
+
+  entities:
+    - name: Candle
+      type: entity
+      layer: domain
+      table_schema: candles
+
+      attributes:
+        - name: symbol
+          type: Symbol
+          nullable: no
+          indexed: yes
+          pii: no
+
+        - name: timeframe
+          type: Timeframe
+          nullable: no
+          indexed: yes
+          pii: no
+
+        - name: open
+          type: Price
+          nullable: no
+          indexed: no
+          pii: no
+
+        - name: high
+          type: Price
+          nullable: no
+          indexed: no
+          pii: no
+
+        - name: low
+          type: Price
+          nullable: no
+          indexed: no
+          pii: no
+
+        - name: close
+          type: Price
+          nullable: no
+          indexed: no
+          pii: no
+
+        - name: volume
+          type: Volume
+          nullable: no
+          indexed: no
+          pii: no
+
+        - name: timestamp
+          type: DateTime<Utc>
+          nullable: no
+          indexed: yes
+          pii: no
+
+        - name: is_complete
+          type: bool
+          nullable: no
+          indexed: yes
+          pii: no
+
+      relationships: []
+
+      invariants:
+        - "high >= low"
+        - "open between high and low"
+        - "close between high and low"
+        - "volume >= 0"
+        - "timestamp must be aligned to timeframe boundary"
+
+      events_emitted:
+        - CandleCompleted
+        - CandleUpdated
+
+    - name: Signal
+      type: entity
+      layer: domain
+      table_schema: signals
+
+      attributes:
+        - name: id
+          type: Uuid
+          nullable: no
+          indexed: yes
+          pii: no
+
+        - name: symbol
+          type: Symbol
+          nullable: no
+          indexed: yes
+          pii: no
+
+        - name: signal_type
+          type: SignalType
+          nullable: no
+          indexed: yes
+          pii: no
+
+        - name: strategy
+          type: StrategyName
+          nullable: no
+          indexed: yes
+          pii: no
+
+        - name: confidence
+          type: Confidence
+          nullable: no
+          indexed: no
+          pii: no
+
+        - name: target_price
+          type: Price
+          nullable: no
+          indexed: no
+          pii: no
+
+        - name: stop_loss
+          type: Option<Price>
+          nullable: yes
+          indexed: no
+          pii: no
+
+        - name: take_profit
+          type: Option<Price>
+          nullable: yes
+          indexed: no
+          pii: no
+
+        - name: timestamp
+          type: DateTime<Utc>
+          nullable: no
+          indexed: yes
+          pii: no
+
+      relationships: []
+
+      invariants:
+        - "confidence between 0.0 and 1.0"
+        - "target_price > 0"
+        - "stop_loss < target_price (for BUY signals)"
+        - "take_profit > target_price (for BUY signals)"
+
+      events_emitted:
+        - SignalGenerated
+        - SignalPublished
+
+    - name: Tick
+      type: entity
+      layer: domain
+      table_schema: null  # Not persisted
+
+      attributes:
+        - name: symbol
+          type: Symbol
+          nullable: no
+          indexed: no
+          pii: no
+
+        - name: price
+          type: Price
+          nullable: no
+          indexed: no
+          pii: no
+
+        - name: volume
+          type: Volume
+          nullable: no
+          indexed: no
+          pii: no
+
+        - name: timestamp
+          type: DateTime<Utc>
+          nullable: no
+          indexed: no
+          pii: no
+
+      relationships: []
+
+      invariants:
+        - "price > 0"
+        - "volume >= 0"
+
+      events_emitted: []
+
+  value_objects:
+    - name: Symbol
+      layer: domain
+      purpose: "Trading pair identifier with validation"
+      validation_rules:
+        - "Must be uppercase"
+        - "Must match pattern: [A-Z]{3,10}USDT"
+        - "Examples: BTCUSDT, ETHUSDT, BNBUSDT"
+
+    - name: Price
+      layer: domain
+      purpose: "Monetary value with precision validation"
+      validation_rules:
+        - "Must be positive (> 0)"
+        - "Precision: up to 8 decimal places"
+
+    - name: Volume
+      layer: domain
+      purpose: "Trading volume with non-negative constraint"
+      validation_rules:
+        - "Must be non-negative (>= 0)"
+
+    - name: Confidence
+      layer: domain
+      purpose: "Signal confidence level"
+      validation_rules:
+        - "Must be between 0.0 and 1.0 inclusive"
+        - "Represents percentage as decimal"
+
+    - name: Timeframe
+      layer: domain
+      purpose: "Candle period with enum validation"
+      validation_rules:
+        - "Enum: M1, M5, M15, H1, H4, D1"
+        - "Maps to duration in seconds"
+
+    - name: SignalType
+      layer: domain
+      purpose: "Trade direction"
+      validation_rules:
+        - "Enum: BUY, SELL"
+
+    - name: StrategyName
+      layer: domain
+      purpose: "Strategy identifier"
+      validation_rules:
+        - "Must be SCREAMING_SNAKE_CASE"
+        - "Examples: RSI_DIVERGENCE, MACD_CROSSOVER"
+
+  dtos:
+    - name: PriceMessage
+      layer: infrastructure
+      purpose: "Kafka message from crypto-listener"
+      source: external (crypto-listener)
+      target: domain::entities::Tick
+      mappings:
+        - from: symbol
+          to: tick.symbol
+        - from: price
+          to: tick.price
+        - from: volume
+          to: tick.volume
+        - from: timestamp
+          to: tick.timestamp
+
+    - name: SignalMessage
+      layer: infrastructure
+      purpose: "Kafka message to crypto-trader"
+      source: domain::entities::Signal
+      target: external (crypto-trader)
+      mappings:
+        - from: signal.id
+          to: message.id
+        - from: signal.symbol
+          to: message.symbol
+        - from: signal.signal_type
+          to: message.side
+
+  database_schemas:
+    - schema_name: public
+      database: postgres
+      tables:
+        - name: candles
+          primary_key: [symbol, timeframe, timestamp]
+          foreign_keys: []
+          indexes:
+            - columns: [symbol, timeframe, timestamp]
+              type: btree
+              unique: yes
+            - columns: [timestamp]
+              type: btree
+              unique: no
+          partitioning: none
+          estimated_rows: 10000000
+          growth_rate: high
+
+        - name: signals
+          primary_key: [id]
+          foreign_keys: []
+          indexes:
+            - columns: [id]
+              type: btree
+              unique: yes
+            - columns: [symbol, timestamp]
+              type: btree
+              unique: no
+            - columns: [strategy, timestamp]
+              type: btree
+              unique: no
+          partitioning: none
+          estimated_rows: 1000000
+          growth_rate: medium
+
+  data_migrations:
+    - id: "init_schema"
+      applied_at: null
+      description: "Initial database schema creation"
+      rollback_available: yes
+
+# ============================================================
+# SEÇÃO 12: SEGURANÇA E COMPLIANCE
+# ============================================================
+security:
+  authentication:
+    strategy: none
+    provider: null
+    description: "Service-to-service communication via Kafka (no user auth)"
+
+  authorization:
+    model: none
+    description: "Internal microservice without user-facing endpoints"
+
+  data_protection:
+    encryption:
+      at_rest: no
+      description: "Market data is public information"
+
+      at_transit: yes
+      protocol: TLS_1.3
+      description: "Kafka communication encrypted via TLS"
+
+    pii_fields: []
+
+    data_retention:
+      - data_type: candles
+        retention_period: 2_years
+        deletion_method: automated
+
+      - data_type: signals
+        retention_period: 1_year
+        deletion_method: automated
+
+  compliance:
+    regulations: []
+    description: "Financial data analysis, not subject to user data regulations"
+
+    audit_logging:
+      enabled: yes
+      events_tracked:
+        - signal_generated
+        - strategy_executed
+        - candle_persisted
+      retention: 6_months
+      storage: postgres
+
+  vulnerabilities:
+    scanning_frequency: weekly
+    tools: [cargo-audit, dependabot]
+
+    known_issues: []
+
+# ============================================================
+# SEÇÃO 13: ESTRATÉGIA DE TESTES
+# ============================================================
+testing_strategy:
+  test_pyramid:
+    unit_tests:
+      coverage_target: 80%
+      current_coverage: 0%
+      framework: cargo_test
+      location: src/**/*_test.rs
+      naming_convention: "test_<scenario>_<expected_result>"
+
+      mocking_strategy: manual_mocks
+
+      key_areas:
+        - domain::entities (target: 100%)
+        - domain::value_objects (target: 100%)
+        - domain::services (target: 90%)
+        - infrastructure::indicators (target: 80%)
+
+    integration_tests:
+      coverage_target: 60%
+      current_coverage: 0%
+      location: tests/integration/**
+
+      test_databases:
+        - type: postgres_testcontainers
+          setup: automatic
+          cleanup: per_test
+
+      external_mocks:
+        - service: kafka
+          tool: testcontainers
+          scenarios: [publish_consume, error_handling]
+
+    e2e_tests:
+      coverage_target: 30%
+      current_coverage: 0%
+      location: tests/e2e/**
+
+      test_env:
+        deployment: docker-compose
+        services: [crypto-signals, postgres, kafka, schema-registry]
+        data_seeding: sql_fixtures
+
+      critical_flows:
+        - "Price received → Candle built → Signal generated → Signal published"
+
+  test_data_management:
+    fixtures:
+      location: tests/fixtures/**
+      format: json
+
+      examples:
+        - name: btc_price_tick
+          file: fixtures/ticks/btc_valid.json
+          usage: "Valid BTC price tick"
+
+    factories:
+      - name: CandleFactory
+        module: tests::factories::candle
+        purpose: "Generate valid candles with random data"
+        customization: "Permite override de symbol, timeframe, prices"
+
+  performance_tests:
+    benchmarks:
+      framework: criterion
+      location: benches/**
+      key_operations:
+        - "Candle update: target <10µs"
+        - "RSI calculation: target <50µs"
+        - "Signal generation: target <100µs"
+
+# ============================================================
+# SEÇÃO 14: TRATAMENTO DE ERROS E OBSERVABILIDADE
+# ============================================================
+error_handling:
+  error_hierarchy:
+    - name: DomainError
+      layer: domain
+      variants:
+        - Validation
+        - NotFound
+        - Concurrency
+      propagation: "Never propagates outside domain"
+
+    - name: ApplicationError
+      layer: application
+      wraps: [DomainError, InfrastructureError]
+      variants:
+        - Domain
+        - Infrastructure
+        - Serde
+      propagation: "Logs and continues processing"
+
+    - name: InfrastructureError
+      layer: infrastructure
+      variants:
+        - Database
+        - EventStore
+        - Messaging
+        - Kafka
+        - Serialization
+      propagation: "Wrapped by ApplicationError"
+
+  error_conversion:
+    - from: DomainError::Validation
+      to: Log Warning
+      message_strategy: expose_details
+
+    - from: InfrastructureError::Database
+      to: Log Error + Continue
+      message_strategy: hide_details
+      logged_context: "Query, pool stats"
+
+  recovery_strategies:
+    - error_type: Kafka::ProducerTimeout
+      strategy: retry_with_backoff
+      max_attempts: 5
+      backoff: exponential
+      fallback: buffer_to_disk
+
+    - error_type: Database::ConnectionFailed
+      strategy: graceful_degradation
+      fallback: continue_without_persistence
+
+    - error_type: InvalidPrice
+      strategy: fail_fast
+      response: log_and_skip
+
+  observability:
+    logging:
+      framework: tracing
+      levels:
+        - level: ERROR
+          conditions: "Infrastructure failures, critical domain errors"
+          includes: [stack_trace, context, correlation_id]
+
+        - level: WARN
+          conditions: "Retries, data validation failures, degraded mode"
+          includes: [context, retry_count]
+
+        - level: INFO
+          conditions: "Signal generated, candle completed, strategy executed"
+          includes: [event_type, symbol, timeframe]
+
+        - level: DEBUG
+          conditions: "Development only - detailed flow"
+          includes: [full_context]
+
+      structured_logging: yes
+      correlation_id: "Generated per price message"
+      pii_scrubbing: not_applicable
+
+    metrics:
+      backend: prometheus
+
+      business_metrics:
+        - name: signals_generated_total
+          type: counter
+          labels: [symbol, strategy, signal_type]
+
+        - name: candles_completed_total
+          type: counter
+          labels: [symbol, timeframe]
+
+        - name: signal_confidence_histogram
+          type: histogram
+          buckets: [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+
+      technical_metrics:
+        - name: kafka_messages_consumed_total
+          type: counter
+          labels: [topic]
+
+        - name: kafka_consumer_lag
+          type: gauge
+          labels: [topic, partition]
+
+        - name: database_query_duration_seconds
+          type: histogram
+          buckets: [0.001, 0.005, 0.01, 0.05, 0.1]
+
+      sli_slo:
+        - metric: price_to_signal_latency_p95
+          slo: "< 100ms"
+          current: unknown
+
+        - metric: kafka_consumer_lag
+          slo: "< 1000 messages"
+          current: unknown
+
+    tracing:
+      backend: jaeger
+      sampling_rate: adaptive
+
+      instrumented_operations:
+        - "Kafka message consumption"
+        - "Candle construction"
+        - "Indicator calculation"
+        - "Strategy execution"
+        - "Signal publishing"
+
+      span_attributes:
+        - symbol
+        - timeframe
+        - strategy
+        - correlation_id
+
+    alerting:
+      channels: [slack]
+
+      alerts:
+        - name: HighKafkaLag
+          condition: "consumer_lag > 5000 for 5m"
+          severity: high
+          notify: [slack]
+
+        - name: NoSignalsGenerated
+          condition: "signals_generated_total == 0 for 1h"
+          severity: medium
+          notify: [slack]
+
+        - name: DatabaseUnavailable
+          condition: "database_connection_pool == 0 for 5m"
+          severity: low
+          notify: [slack]
+          notes: "Service continues without persistence"
+
+# ============================================================
+# SEÇÃO 15: PADRÕES E ANTI-PADRÕES
+# ============================================================
+design_patterns:
+  architectural_patterns:
+    - pattern: Ports and Adapters (Hexagonal)
+      usage: "Isolar domain de infrastructure"
+      locations: [application::ports, infrastructure]
+      benefits: "Testabilidade, flexibilidade, domain puro"
+      tradeoffs: "Mais abstrações, boilerplate inicial"
+
+    - pattern: Event-Driven Architecture
+      usage: "Comunicação assíncrona via Kafka"
+      locations: [infrastructure::messaging, domain::events]
+      benefits: "Desacoplamento, escalabilidade"
+      tradeoffs: "Eventual consistency, debugging complexo"
+
+    - pattern: Strategy Pattern
+      usage: "Trading strategies plugin-based"
+      locations: [application::strategies]
+      benefits: "Extensibilidade, testabilidade isolada"
+      tradeoffs: "Overhead de abstração"
+
+  creational_patterns:
+    - pattern: Factory
+      usage: "Criação de candles from ticks"
+      example_module: domain::entities::candle
+      scenario: "Candle requires validation and initialization"
+
+    - pattern: Builder
+      usage: "Signal construction with optional fields"
+      example_module: domain::entities::signal
+      scenario: "Signal has many optional fields (stop_loss, take_profit)"
+
+  behavioral_patterns:
+    - pattern: Strategy
+      usage: "Interchangeable trading strategies"
+      example_module: application::strategies::strategy_trait
+      implementations: [rsi_divergence, macd_crossover, bollinger_bands]
+
+    - pattern: Observer
+      usage: "Event handlers for domain events"
+      example_module: application::handlers
+      scenario: "CandleCompleted → Execute strategies, Persist candle"
+
+  anti_patterns:
+    known_code_smells: []
+
+    architectural_debt:
+      - debt: Missing concrete repository implementations
+        affected_modules: [infrastructure::repositories]
+        description: "Base repository exists but no CandleRepositoryImpl or SignalRepositoryImpl"
+        impact: "Cannot persist candles or signals to database"
+        effort_estimate: 8h
+        priority: high
+
+      - debt: No circuit breakers for Kafka
+        affected_modules: [infrastructure::messaging]
+        description: "No protection against Kafka unavailability"
+        impact: "Risk of cascading failures"
+        effort_estimate: 16h
+        priority: medium
+
+  refactoring_queue:
+    - name: "Implement concrete repository adapters"
+      current_state: "Generic Repository<T> trait exists"
+      desired_state: "CandleRepositoryImpl and SignalRepositoryImpl"
+      reason: "Enable database persistence"
+      blocked_by: null
+      estimated_effort: 8h
+
+    - name: "Add comprehensive unit tests"
+      current_state: "0% test coverage"
+      desired_state: "80% coverage for domain and application layers"
+      reason: "Ensure correctness and enable refactoring"
+      blocked_by: null
+      estimated_effort: 40h
+
+# ============================================================
+# SEÇÃO 17: INTEGRAÇÃO COM FERRAMENTAS DE DEV
+# ============================================================
+development_ecosystem:
+  version_control:
+    system: git
+    platform: github
+    branching_strategy: trunk_based
+
+    commit_conventions: conventional_commits
+    commit_template: |
+      type(scope): subject
+      
+      body
+      
+      footer
+
+  ci_cd:
+    platform: github_actions
+
+    pipelines:
+      - name: PR Validation
+        triggers: [pull_request]
+        steps:
+          - lint: cargo clippy
+          - format_check: cargo fmt --check
+          - unit_tests: cargo test
+          - integration_tests: cargo test --test '*'
+          - security_scan: cargo audit
+        duration_avg: 5m
+
+      - name: Release
+        triggers: [push_to_main]
+        steps:
+          - build: cargo build --release
+          - docker_build: docker build -t crypto-signals:$VERSION
+          - push_registry: docker push
+        duration_avg: 10m
+
+  code_quality_tools:
+    - tool: clippy
+      purpose: "Linting e code smells"
+      enforced: yes
+
+    - tool: rustfmt
+      purpose: "Formatação consistente"
+      auto_fix: on_save
+
+    - tool: cargo-audit
+      purpose: "Verificar vulnerabilidades"
+      blocking: yes
+
+  documentation_tools:
+    - tool: rustdoc
+      purpose: "API documentation"
+      coverage: 60%
+
+    - tool: markdown
+      purpose: "Architecture docs e guides"
+      location: docs/
+
+best_practices:
+  - category: architecture
+    note: "Bootstrap, startup, and shutdown modules follow single responsibility principle"
+    priority: high
+
+  - category: configuration
+    note: "Multiple Kafka topics/producers/consumers supported via Settings HashMap"
+    priority: high
+
+  - category: naming
+    note: "Follow consistent naming pattern for Kafka topics (e.g., {app-name}-{topic-name})"
+    priority: medium
+
+  - category: testing
+    note: "Domain layer must have 100% coverage - it's pure logic with no I/O"
+    priority: high
+
+  - category: error_handling
+    note: "Use thiserror for domain errors, never panic in domain layer"
+    priority: high
+
+  - category: repository
+    note: "Repository implementations must be stateless except for connection pool"
+    priority: medium
+
+quality:
+  test_coverage: 0%
+  cyclomatic_complexity: medium
+  coupling: low
+  cohesion: high
+
+# ============================================================
+# METADADOS
+# ============================================================
+_metadata:
+  last_updated: "2025-11-29T00:00:00Z"
+  template_version: v4.1
+  updated_layers:
+    - infrastructure
+    - data_model
+    - security
+    - testing_strategy
+    - error_handling
+    - design_patterns
+    - development_ecosystem
+
+  generation_stats:
+    total_files_scanned: 50
+    total_lines_of_code: 5000
+    generation_time_seconds: 300
+
+  schema_completeness:
+    total_sections: 17
+    mandatory_sections: [overview, architecture, data_model, security, testing_strategy, error_handling]
+    optional_sections: [business_flows, api_contracts, deployment, health_metrics, architectural_decisions, responsibility_matrix, evolution, design_patterns, historical_context, development_ecosystem]
+    implemented_sections: [overview, architecture, business_flows, api_contracts, deployment, project, application, domain, infrastructure, shared, data_model, security, testing_strategy, error_handling, design_patterns, development_ecosystem, best_practices, quality]
+
+
