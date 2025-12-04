@@ -6,6 +6,51 @@ Este documento contém recomendações de melhoria identificadas após análise 
 
 ---
 
+## ✅ MELHORIAS JÁ IMPLEMENTADAS
+
+### Sessão Dezembro 2025 - Consolidação de Documentação
+
+| Item | Status | Descrição |
+|------|--------|-----------|
+| Reorganização `_base/` | ✅ Completo | Criadas subpastas por projeto (6 subfolders) |
+| `WHICH_PROJECT_DOES_WHAT.md` | ✅ Criado | Matriz completa de responsabilidades (512 linhas) |
+| `crypto-listener` BOUNDARIES | ✅ Criado | Arquivo de fronteiras que estava faltando |
+| Consolidação de Prompts LLM | ✅ Completo | 3 arquivos → 1 (`LLM_MASTER_PROMPT.md`) |
+| Remoção de arquivos obsoletos | ✅ Completo | Removido `.ini` desatualizado (mencionava Python) |
+| Atualização para 6 projetos | ✅ Completo | Todos os docs agora incluem crypto-listener |
+
+### Estrutura Atual de `_base/`
+
+```
+_base/
+├── BOUNDARIES_GUIDE.md          # Guia geral de fronteiras
+├── IMPLEMENTATION_PATTERNS.md   # Padrões de implementação
+├── IMPROVEMENTS.md              # Este arquivo
+├── LLM_MASTER_PROMPT.md         # 🆕 Prompt consolidado (substitui 3 arquivos)
+├── WHICH_PROJECT_DOES_WHAT.md   # Matriz de responsabilidades
+└── [6 subfolders]/
+    ├── crypto-listener/
+    │   ├── BOUNDARIES.md
+    │   └── projectmap.yaml
+    ├── crypto-webhook/
+    │   ├── BOUNDARIES.md
+    │   └── projectmap.yaml
+    ├── crypto-signals/
+    │   ├── BOUNDARIES.md
+    │   └── projectmap.yaml
+    ├── crypto-trader/
+    │   ├── BOUNDARIES.md
+    │   └── projectmap.yaml
+    ├── crypto-management/
+    │   ├── BOUNDARIES.md
+    │   └── projectmap.yaml
+    └── crypto-notifications/
+        ├── BOUNDARIES.md
+        └── projectmap.yaml
+```
+
+---
+
 ## 📊 Resumo Executivo
 
 | Categoria | Prioridade | Impacto |
