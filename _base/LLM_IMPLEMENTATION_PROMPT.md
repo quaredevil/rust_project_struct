@@ -1,12 +1,27 @@
 # 🎯 PROMPT PARA LLM: Implementação de Projeto do Ecossistema Crypto Trading
 
+## 🌐 VISÃO GERAL DO ECOSSISTEMA
+
+Este ecossistema consiste em **6 microserviços Rust** que se comunicam **EXCLUSIVAMENTE via Kafka**.
+
+| Projeto | Mantra | Função Principal |
+|---------|--------|------------------|
+| **crypto-listener** | "EU ESCUTO O MERCADO" | Ingestão de dados via Binance WebSocket |
+| **crypto-webhook** | "EU RECEBO, VALIDO E NORMALIZO" | Gateway HTTP para webhooks externos |
+| **crypto-signals** | "EU ANALISO MERCADO. EU GERO SINAIS" | Análise técnica e geração de sinais |
+| **crypto-trader** | "EU EXECUTO ORDENS" | Execução de ordens na exchange |
+| **crypto-management** | "EU ORQUESTRO E COORDENO" | Cérebro central - posições e risco |
+| **crypto-notifications** | "EU NOTIFICO" | Distribuição de alertas multi-canal |
+
+---
+
 ## 📋 Instruções Obrigatórias
 
 Antes de implementar QUALQUER código, você DEVE:
 
 ### 1. Identificar o Projeto
 ```
-Projeto atual: [crypto-trader | crypto-signals | crypto-notifications | crypto-webhook | crypto-management]
+Projeto atual: [crypto-listener | crypto-trader | crypto-signals | crypto-notifications | crypto-webhook | crypto-management]
 ```
 
 ### 2. Ler Documentação de Fronteiras
@@ -58,6 +73,7 @@ Se QUALQUER resposta for NÃO ou SIM incorreto:
 ### Regra 2: Responsabilidade Única
 ```yaml
 SE você está implementando:
+  - Ingestão de dados de mercado → DEVE ser crypto-listener
   - Análise técnica (RSI, MACD) → DEVE ser crypto-signals
   - Execução de ordens → DEVE ser crypto-trader
   - Envio de notificações → DEVE ser crypto-notifications
@@ -85,6 +101,24 @@ ANTES de implementar qualquer lógica, pergunte:
 
 ## 🎯 Padrões de Implementação por Projeto
 
+### crypto-listener: "Eu Escuto o Mercado"
+```rust
+// ✅ PERMITIDO
+- Conectar: Binance WebSocket (klines, trades, ticker)
+- Construir: Candles a partir de trades
+- Publicar: crypto-listener.prices
+- Consumir: crypto-listener.subscribe, crypto-listener.unsubscribe
+- Persistir: Dados históricos no TimescaleDB
+
+// ❌ PROIBIDO
+- Calcular indicadores técnicos (RSI, MACD) → crypto-signals
+- Gerar sinais de trading → crypto-signals
+- Executar ordens → crypto-trader
+- Gerenciar posições → crypto-management
+- Receber webhooks HTTP → crypto-webhook
+- Enviar notificações diretas → crypto-notifications
+```
+
 ### crypto-signals: "Eu Analiso e Sinalizo"
 ```rust
 // ✅ PERMITIDO
@@ -98,6 +132,7 @@ ANTES de implementar qualquer lógica, pergunte:
 - Enviar notificações diretas (Telegram/Discord)
 - Gerenciar posições
 - Receber webhooks HTTP
+- Conectar ao WebSocket de mercado → crypto-listener
 ```
 
 ### crypto-trader: "Eu Executo Ordens"
@@ -164,11 +199,21 @@ ANTES de implementar qualquer lógica, pergunte:
 - Implementar estratégias de análise
 - Enviar notificações diretas
 - Receber webhooks HTTP
+- Conectar ao WebSocket de mercado → crypto-listener
 ```
 
 ---
 
 ## 🔍 Perguntas de Validação
+
+### Antes de Conectar ao WebSocket de Mercado:
+```
+❓ Estou no crypto-listener?
+   SE NÃO → PARE! Ingestão de dados só no crypto-listener
+   
+❓ Estou conectando ao Binance WebSocket?
+   SE SIM e NÃO for crypto-listener → PARE!
+```
 
 ### Antes de Implementar Análise Técnica:
 ```
@@ -654,13 +699,14 @@ NUNCA NADO ENTRE ILHAS (HTTP direto, shared DB, etc.).
 ## 📞 Quando em Dúvida
 
 1. Consulte: `BOUNDARIES_{projeto}.md`
-2. Consulte: `BOUNDARIES_GUIDE.md`
-3. Consulte: Este arquivo
-4. Pergunte: "Isso está nas responsibilities do meu projeto?"
-5. Se NÃO: Encontre o projeto correto e use Kafka
+2. Consulte: `WHICH_PROJECT_DOES_WHAT.md`
+3. Consulte: `BOUNDARIES_GUIDE.md`
+4. Consulte: Este arquivo
+5. Pergunte: "Isso está nas responsibilities do meu projeto?"
+6. Se NÃO: Encontre o projeto correto e use Kafka
 
 ---
 
-**Última Atualização:** 2025-10-21  
-**Versão:** 1.0.0
+**Última Atualização:** 2025-01-20  
+**Versão:** 1.1.0
 

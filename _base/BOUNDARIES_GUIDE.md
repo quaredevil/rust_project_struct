@@ -2,7 +2,20 @@
 
 ## ⚠️ LEIA ANTES DE IMPLEMENTAR QUALQUER PROJETO
 
-Este documento define as **fronteiras estritas** entre os projetos do ecossistema de crypto trading. O problema que estamos resolvendo é a **EVASÃO DE FRONTEIRAS** - quando um LLM implementa funcionalidades de outro projeto dentro do projeto atual.
+Este documento define as **fronteiras estritas** entre os 6 projetos do ecossistema de crypto trading. O problema que estamos resolvendo é a **EVASÃO DE FRONTEIRAS** - quando um LLM implementa funcionalidades de outro projeto dentro do projeto atual.
+
+---
+
+## 🌐 Visão Geral do Ecossistema
+
+| Projeto | Mantra | Função |
+|---------|--------|--------|
+| **crypto-listener** | "EU ESCUTO O MERCADO" | Ingestão de dados via WebSocket |
+| **crypto-webhook** | "EU RECEBO, VALIDO E NORMALIZO" | Gateway HTTP para webhooks |
+| **crypto-signals** | "EU ANALISO MERCADO. EU GERO SINAIS" | Análise técnica e sinais |
+| **crypto-trader** | "EU EXECUTO ORDENS" | Execução na exchange |
+| **crypto-management** | "EU ORQUESTRO E COORDENO" | Cérebro central |
+| **crypto-notifications** | "EU NOTIFICO" | Alertas multi-canal |
 
 ---
 
@@ -15,6 +28,7 @@ Este documento define as **fronteiras estritas** entre os projetos do ecossistem
 - Implementar envio de notificações dentro do `crypto-management` (deveria estar no `crypto-notifications`)
 - Implementar recepção de webhooks dentro do `crypto-signals` (deveria estar no `crypto-webhook`)
 - Implementar gerenciamento de posições globais dentro do `crypto-trader` (deveria estar no `crypto-management`)
+- Implementar conexão WebSocket de mercado dentro do `crypto-signals` (deveria estar no `crypto-listener`)
 
 ---
 
@@ -53,6 +67,8 @@ Este documento define as **fronteiras estritas** entre os projetos do ecossistem
 
 | Funcionalidade | Projeto Responsável | Outros Projetos |
 |----------------|---------------------|-----------------|
+| **Ingestão de Dados de Mercado** | crypto-listener | ❌ NÃO implementam |
+| **Conexão WebSocket Binance** | crypto-listener | ❌ NÃO implementam |
 | **Análise Técnica** | crypto-signals | ❌ NÃO implementam |
 | **Geração de Sinais** | crypto-signals, crypto-webhook | ❌ NÃO implementam |
 | **Execução de Ordens** | crypto-trader | ❌ NÃO implementam |
@@ -67,6 +83,38 @@ Este documento define as **fronteiras estritas** entre os projetos do ecossistem
 ---
 
 ## 🚫 PROIBIÇÕES POR PROJETO
+
+### crypto-listener (Ingestor de Dados de Mercado)
+
+#### ✅ PODE FAZER:
+- Conectar ao Binance WebSocket
+- Receber trades e klines em tempo real
+- Construir candles a partir de trades
+- Publicar preços no Kafka
+- Responder a comandos de subscribe/unsubscribe
+
+#### ❌ NÃO PODE FAZER:
+```yaml
+❌ Calcular indicadores técnicos (RSI, MACD, EMA, etc.)
+   → Responsabilidade: crypto-signals
+   
+❌ Gerar sinais de trading (BUY/SELL)
+   → Responsabilidade: crypto-signals
+   
+❌ Executar ordens na exchange
+   → Responsabilidade: crypto-trader
+   
+❌ Gerenciar posições ou calcular P&L
+   → Responsabilidade: crypto-management
+   
+❌ Receber webhooks HTTP
+   → Responsabilidade: crypto-webhook
+   
+❌ Enviar notificações (Telegram, Discord, Email)
+   → Responsabilidade: crypto-notifications
+```
+
+---
 
 ### crypto-trader (Executor de Ordens)
 
@@ -105,6 +153,9 @@ Este documento define as **fronteiras estritas** entre os projetos do ecossistem
    
 ❌ Controlar estratégias (enable/disable)
    → Responsabilidade: crypto-management
+   
+❌ Conectar ao WebSocket de mercado
+   → Responsabilidade: crypto-listener
 ```
 
 ---
@@ -141,6 +192,10 @@ Este documento define as **fronteiras estritas** entre os projetos do ecossistem
 ❌ Gerenciar stops (stop loss, take profit)
    → Responsabilidade: crypto-trader
    → Solução: Sugira no sinal, crypto-trader aplica
+   
+❌ Conectar ao WebSocket de mercado
+   → Responsabilidade: crypto-listener
+   → Solução: Consuma preços do Kafka
 ```
 
 ---
@@ -435,6 +490,6 @@ Use este template ao implementar qualquer funcionalidade:
 
 ---
 
-**Última Atualização:** 2025-10-21
-**Versão:** 1.0.0
+**Última Atualização:** 2025-01-20
+**Versão:** 1.1.0
 

@@ -1,0 +1,2634 @@
+---
+project:
+  name: crypto-listener
+  language: Rust
+  edition: "2024"
+  architecture_style: "Hexagonal (Ports & Adapters)"
+  description: |
+    Real-time cryptocurrency market data ingestion, normalization, and publishing service.
+    Consumes WebSocket streams from Binance, filters price updates, and publishes to Kafka.
+    Built with clean architecture principles for testability and extensibility.
+    Kafka is the core messaging infrastructure - all price updates flow directly to Kafka topics.
+    All Kafka topics follow naming pattern: crypto-listener-{topic-name}
+
+  features:
+    default: []
+    optional:
+      - binance-connector: Uses official Binance Rust connector instead of custom WebSocket
+
+  runtime: "Tokio async (full features)"
+  web_framework: "Axum 0.8.6"
+  database: "PostgreSQL (used only for subscription persistence)"
+  messaging: "Kafka (always enabled, JSON serialization)"
+  observability: "tracing + tracing-subscriber (structured JSON logs)"
+
+  documentation:
+    location: "docs/"
+    conventions:
+      - "All technical documentation files must be placed in the docs/ folder"
+      - "Use descriptive uppercase names with underscores (e.g., KAFKA_TOPICS_MIGRATION.md)"
+      - "Each significant feature, migration, or architectural decision should have its own .md file"
+      - "Include date and version information in documentation when relevant"
+      - "Migration guides should follow pattern: {FEATURE}_MIGRATION.md"
+      - "Architecture decision records should follow pattern: ADR_{NUMBER}_{TITLE}.md"
+      - "How-to guides should follow pattern: HOWTO_{TOPIC}.md"
+
+    existing_files:
+      - name: KAFKA_TOPICS_MIGRATION.md
+        purpose: "Guide for migrating to new Kafka topic naming pattern (crypto-listener-{topic-name})"
+        created: "2025-10-16"
+        category: migration
+
+  kafka_topics:
+    - name: crypto-listener-prices
+      description: "Price update events from market data stream"
+      message_type: PriceUpdate
+      env_var: KAFKA_TOPIC_PRICES
+    - name: crypto-listener-subscription-commands
+      description: "Commands to subscribe to market data symbols"
+      message_type: SubscribeCommand
+      env_var: KAFKA_TOPIC_SUBSCRIPTION_COMMANDS
+    - name: crypto-listener-unsubscription-commands
+      description: "Commands to unsubscribe from market data symbols"
+      message_type: UnsubscribeCommand
+      env_var: KAFKA_TOPIC_UNSUBSCRIPTION_COMMANDS
+
+naming_style: snake_case
+
+application:
+  description: |
+    Application layer orchestrates use cases, defines port contracts (traits),
+    and provides DTOs for cross-layer communication. This layer is pure business
+    logic coordination without infrastructure knowledge.
+
+  naming_style: snake_case
+
+  modules:
+    - name: ports
+      path: src/application/ports
+      purpose: "Port trait definitions (hexagonal architecture contracts)"
+
+      directories:
+        - path: src/application/ports
+          purpose: "Driving and driven port trait definitions"
+          files:
+            - mod.rs
+            - market_data_stream_port.rs
+            - price_publisher_port.rs
+            - subscription_store_port.rs
+            - event_store.rs
+            - projection_store.rs
+            - message_bus.rs
+          key_types:
+            - MarketDataStreamPort
+            - PricePublisherPort
+            - SubscriptionStorePort
+            - EventStore
+            - ProjectionStore
+            - MessageBus
+            - PriceUpdate
+
+      dependencies:
+        internal: [shared]
+        external: [async-trait, serde]
+
+      exports:
+        interfaces:
+          - MarketDataStreamPort
+          - PricePublisherPort
+          - SubscriptionStorePort
+        types:
+          - PriceUpdate
+
+      complexity: low
+      lines_of_code: 120
+
+    - name: dtos
+      path: src/application/dtos
+      purpose: "Data Transfer Objects for API contracts, layer boundaries, and Kafka commands"
+
+      directories:
+        - path: src/application/dtos
+          purpose: "Request, response DTOs, and command messages"
+          files:
+            - mod.rs
+            - requests.rs
+            - responses.rs
+            - commands.rs
+          key_types:
+            - SubscribeRequest
+            - UnsubscribeRequest
+            - SubscribeCommand
+            - UnsubscribeCommand
+
+      dependencies:
+        internal: []
+        external: [serde, uuid, chrono]
+
+      exports:
+        types:
+          - SubscribeRequest
+          - UnsubscribeRequest
+          - SubscribeCommand
+          - UnsubscribeCommand
+
+      complexity: low
+      lines_of_code: 90
+
+    - name: services
+      path: src/application/services
+      purpose: "Application service orchestrators (currently empty, reserved for future use cases)"
+
+      directories:
+        - path: src/application/services
+          purpose: "Use case orchestration services"
+          files: [mod.rs]
+
+      dependencies:
+        internal: [ports, dtos]
+        external: []
+
+      complexity: low
+      lines_of_code: 10
+
+    - name: queries
+      path: src/application/queries
+      purpose: "Query handlers for read operations (currently empty, reserved for CQRS pattern support)"
+
+      directories:
+        - path: src/application/queries
+          purpose: "Query definitions and handlers"
+          files:
+            - mod.rs
+
+      dependencies:
+        internal: [ports]
+        external: []
+
+      complexity: low
+      lines_of_code: 10
+
+  conventions:
+    - "All ports are async traits with Send + Sync bounds"
+    - "Port methods return InfraResult<T> for infrastructure errors"
+    - "DTOs use serde Serialize/Deserialize for JSON compatibility"
+    - "PriceUpdate is the canonical type for market data events"
+    - "Default trait implementations provide optional hooks (shutdown, flush)"
+    - "Kafka is always enabled - no feature flag needed"
+
+  patterns:
+    - pattern: Port/Adapter (Hexagonal)
+      usage: "Ports define contracts in application layer, adapters implement in infrastructure"
+      examples: [MarketDataStreamPort, PricePublisherPort]
+
+  interactions:
+    - from: application.ports
+      to: infrastructure.messaging
+      method: event
+      direction: async
+      data_format: rust_types
+
+  glossary_refs:
+    - term: Port
+      relevance: "Defines interface contracts between application and infrastructure"
+      usage_locations:
+        - src/application/ports/market_data_stream_port.rs
+        - src/application/ports/price_publisher_port.rs
+    - term: PriceUpdate
+      relevance: "Core domain event representing a market price change"
+      usage_locations:
+        - src/application/ports/price_publisher_port.rs:5-10
+
+  notes:
+    - category: architecture
+      note: "Services module currently minimal; will expand with complex orchestration use cases"
+      priority: low
+    - category: future
+      note: "Consider adding command handlers alongside queries for full CQRS"
+      priority: medium
+
+  quality:
+    test_coverage: unknown
+    cyclomatic_complexity: low
+    coupling: loose
+    cohesion: high
+
+domain:
+  description: |
+    Domain layer contains pure business logic, aggregates, entities, value objects,
+    and domain events. Currently minimal as focus is on market data pipeline.
+    Reserved for future market-specific domain models.
+
+  naming_style: snake_case
+
+  modules:
+    - name: aggregates
+      path: src/domain/aggregates
+      purpose: "Domain aggregates (currently empty, reserved for market-specific aggregates)"
+
+      directories:
+        - path: src/domain/aggregates
+          purpose: "Aggregate root entities"
+          files:
+            - mod.rs
+
+      dependencies:
+        internal: [domain.events, shared.traits]
+        external: []
+
+      complexity: low
+      lines_of_code: 10
+
+    - name: entities
+      path: src/domain/entities
+      purpose: "Domain entities (currently empty, reserved for market domain models)"
+
+      directories:
+        - path: src/domain/entities
+          purpose: "Business entities"
+          files: [mod.rs]
+
+      complexity: low
+      lines_of_code: 10
+
+    - name: events
+      path: src/domain/events
+      purpose: "Domain events (currently empty, reserved for market-specific events)"
+
+      directories:
+        - path: src/domain/events
+          purpose: "Event definitions"
+          files:
+            - mod.rs
+
+      dependencies:
+        internal: []
+        external: []
+
+      complexity: low
+      lines_of_code: 10
+
+    - name: value_objects
+      path: src/domain/value_objects
+      purpose: "Immutable value objects (currently empty, reserved for market-specific value objects)"
+
+      directories:
+        - path: src/domain/value_objects
+          purpose: "Domain value types"
+          files: [mod.rs]
+
+      complexity: low
+      lines_of_code: 10
+
+    - name: errors
+      path: src/domain/errors.rs
+      purpose: "Domain-level error types"
+
+      dependencies:
+        internal: []
+        external: [thiserror]
+
+      exports:
+        types: [DomainError, DomainResult]
+
+      complexity: low
+      lines_of_code: 30
+
+  conventions:
+    - "Domain layer has zero infrastructure dependencies"
+    - "Aggregates implement AggregateRoot trait from shared layer"
+    - "Events are immutable and serializable"
+    - "Use thiserror for domain error definitions"
+
+  patterns:
+    - pattern: Event Sourcing
+      usage: "Reserved for future use - aggregates will emit domain events that represent state changes"
+      examples: []
+
+  glossary_refs:
+    - term: Aggregate
+      relevance: "DDD aggregate root pattern for consistency boundaries"
+      usage_locations: []
+    - term: DomainEvent
+      relevance: "Represents facts that happened in the domain"
+      usage_locations: []
+
+  notes:
+    - category: architecture
+      note: "Domain layer intentionally minimal; most logic is orchestration in infrastructure"
+      priority: low
+    - category: future
+      note: "Add market-specific aggregates like TradingPair, PriceSnapshot, Subscription"
+      priority: medium
+    - category: simplification
+      note: "Removed legacy user aggregate and events - not part of crypto market data pipeline"
+      priority: high
+
+  quality:
+    test_coverage: unknown
+    cyclomatic_complexity: low
+    coupling: loose
+    cohesion: medium
+
+infrastructure:
+  description: |
+    Infrastructure layer implements adapters for external systems (Binance WebSocket,
+    Kafka, PostgreSQL for subscriptions only). Contains all I/O and framework-specific code.
+    Price updates flow directly from Binance to Kafka without database persistence.
+    Also includes bootstrap, startup, and shutdown modules for application lifecycle management.
+    All Kafka topics follow the naming pattern: crypto-listener-{topic-name}
+
+  naming_style: snake_case
+
+  modules:
+    - name: bootstrap
+      path: src/infrastructure/bootstrap
+      purpose: "Component initialization and dependency bootstrapping with retry logic and fallbacks"
+
+      directories:
+        - path: src/infrastructure/bootstrap
+          purpose: "Infrastructure component bootstrapping"
+          files:
+            - mod.rs
+            - database.rs
+            - publisher.rs
+            - market_stream.rs
+            - subscription_store.rs
+          key_types:
+            - DatabaseBootstrap
+            - PublisherBootstrap
+            - MarketStreamBootstrap
+            - SubscriptionStoreBootstrap
+            - NoopMarketStream (internal fallback)
+
+      dependencies:
+        internal: [application.ports, shared.errors, infrastructure.config, infrastructure.messaging, infrastructure.persistence]
+        external: [sqlx, tokio, tracing, async-trait]
+
+      exports:
+        types:
+          - DatabaseBootstrap
+          - PublisherBootstrap
+          - MarketStreamBootstrap
+          - SubscriptionStoreBootstrap
+
+      complexity: medium
+      lines_of_code: 350
+
+      features:
+        - "Database connection with configurable retry logic"
+        - "Kafka publisher initialization with optional batching wrapper"
+        - "Market stream initialization with NoopMarketStream fallback on failure"
+        - "Subscription store initialization from database pool"
+        - "Automatic reload of persisted subscriptions on startup"
+        - "Health check validation for each component"
+        - "Structured logging for all bootstrap operations"
+
+      resilience:
+        database:
+          retry_attempts: "Configurable via max_connect_attempts (default: 5)"
+          retry_delay: "Configurable via connect_retry_delay_ms (default: 2000ms)"
+          behavior: "Logs warnings on retry, continues without DB if all attempts fail"
+        market_stream:
+          fallback: "NoopMarketStream - logs warnings but doesn't crash application"
+          behavior: "Validates health after creation, uses fallback on failure"
+        publisher:
+          behavior: "Panics if Kafka unavailable - Kafka is required infrastructure"
+
+      notes:
+        - category: architecture
+          note: "Bootstrap modules separate initialization concerns from business logic"
+          priority: high
+        - category: resilience
+          note: "Fallback implementations ensure application starts even with partial failures"
+          priority: high
+
+    - name: startup
+      path: src/infrastructure/startup
+      purpose: "Application startup configuration, health checks, and user feedback"
+
+      directories:
+        - path: src/infrastructure/startup
+          purpose: "Startup sequence coordination"
+          files:
+            - mod.rs
+            - logging.rs
+            - banner.rs
+            - health.rs
+          key_types:
+            - LoggingSetup
+            - StartupBanner
+            - HealthSummary
+            - ComponentHealth
+
+      dependencies:
+        internal: [application.ports]
+        external: [tracing, tracing-subscriber, sqlx]
+
+      exports:
+        types:
+          - LoggingSetup
+          - StartupBanner
+          - HealthSummary
+          - ComponentHealth
+
+      complexity: low
+      lines_of_code: 150
+
+      features:
+        - "Structured JSON logging initialization with environment-based filtering"
+        - "Visual startup banner with component health status (✓ OK / ✗ UNAVAILABLE)"
+        - "Aggregated health checks for all infrastructure components"
+        - "Detailed logging of component availability"
+
+      notes:
+        - category: operations
+          note: "Banner provides immediate visual feedback on system health at startup"
+          priority: high
+        - category: observability
+          note: "JSON logs with structured fields enable better monitoring and debugging"
+          priority: high
+
+    - name: shutdown
+      path: src/infrastructure/shutdown
+      purpose: "Graceful shutdown coordination with signal handling and resource cleanup"
+
+      directories:
+        - path: src/infrastructure/shutdown
+          purpose: "Shutdown sequence orchestration"
+          files:
+            - mod.rs
+            - signal_handler.rs
+            - graceful.rs
+          key_types:
+            - SignalHandler
+            - GracefulShutdown
+
+      dependencies:
+        internal: [application.ports]
+        external: [tokio, tracing]
+
+      exports:
+        types:
+          - SignalHandler
+          - GracefulShutdown
+
+      complexity: low
+      lines_of_code: 180
+
+      features:
+        - "OS signal handling (SIGTERM, SIGINT/Ctrl+C)"
+        - "Cross-platform support (Unix and Windows)"
+        - "Sequential shutdown with configurable timeouts (default: 5s)"
+        - "Publisher flush before shutdown to prevent data loss"
+        - "Detailed logging of shutdown sequence"
+        - "Timeout handling for unresponsive components"
+
+      shutdown_sequence:
+        1: "Wait for shutdown signal"
+        2: "Flush publisher (with timeout)"
+        3: "Shutdown publisher (with timeout)"
+        4: "Shutdown market stream (with timeout)"
+        5: "Log completion"
+
+      notes:
+        - category: reliability
+          note: "Graceful shutdown prevents data loss by flushing buffers before exit"
+          priority: high
+        - category: kubernetes
+          note: "Proper SIGTERM handling enables zero-downtime deployments"
+          priority: high
+
+    - name: messaging
+      path: src/infrastructure/messaging
+      purpose: "Market data streams and Kafka publishing adapters with robust reconnection logic"
+
+      directories:
+        - path: src/infrastructure/messaging
+          purpose: "WebSocket adapters and Kafka publishers with automatic retry and recovery"
+          files:
+            - mod.rs
+            - binance_stream.rs
+            - binance_connector_stream.rs
+            - kafka_price_publisher.rs
+            - batching_price_publisher.rs
+            - metrics.rs
+          key_types:
+            - BinanceMarketDataStream
+            - BinanceConnectorMarketDataStream
+            - KafkaPricePublisher
+            - BatchingPricePublisher
+            - Metrics
+
+      directories_kafka:
+        - path: src/infrastructure/messaging/kafka
+          purpose: "Modular Kafka infrastructure"
+          files:
+            - mod.rs
+            - common.rs
+          subdirectories:
+            - producers/
+            - consumers/
+
+      dependencies:
+        internal: [application.ports, shared.errors]
+        external:
+          - tokio
+          - tokio-tungstenite
+          - futures
+          - rdkafka
+          - reqwest
+          - binance_connector_rust (optional, binance-connector feature)
+          - once_cell
+          - parking_lot
+
+      exports:
+        types:
+          - ActiveMarketStream (alias to feature-selected implementation)
+          - Metrics
+          - METRICS (static singleton)
+
+      complexity: high
+      lines_of_code: 700
+
+      resilience:
+        reconnection:
+          max_attempts: "Configurable via MARKET_WS_MAX_RECONNECT_ATTEMPTS (default: 10)"
+          delay_ms: "Configurable via MARKET_WS_RECONNECT_DELAY_MS (default: 5000)"
+          behavior: |
+            - Tracks reconnection attempts independently for connection failures and disconnections
+            - Resets counter to 0 on successful connection
+            - Logs each retry attempt with current attempt number and max attempts
+            - On successful reconnection, automatically re-subscribes to all active symbols
+            - If max attempts reached, logs error and terminates application (exit code 1)
+          configuration:
+            - ws_max_reconnect_attempts: "Number of retry attempts before giving up"
+            - ws_reconnect_delay_ms: "Delay in milliseconds between retry attempts"
+
+    - name: persistence
+      path: src/infrastructure/persistence
+      purpose: "Database adapter for subscription persistence only"
+
+      directories:
+        - path: src/infrastructure/persistence
+          purpose: "PostgreSQL repository for subscriptions"
+          files:
+            - mod.rs
+            - postgres_market_state_store.rs
+          key_types:
+            - PostgresMarketStateStore
+
+      dependencies:
+        internal: [application.ports, shared.errors]
+        external: [sqlx, tokio]
+
+      exports:
+        types:
+          - PostgresMarketStateStore
+
+      complexity: low
+      lines_of_code: 80
+
+    - name: config
+      path: src/infrastructure/config
+      purpose: "Configuration management and settings"
+
+      directories:
+        - path: src/infrastructure/config
+          purpose: "Application configuration"
+          files:
+            - mod.rs
+            - settings.rs
+          key_types:
+            - Settings
+            - AppConfig
+            - DatabaseConfig
+            - MarketConfig
+            - KafkaConfig
+            - TopicsConfig
+
+      dependencies:
+        internal: []
+        external: [serde, config]
+
+      exports:
+        types:
+          - Settings
+          - TopicsConfig
+
+      complexity: low
+      lines_of_code: 220
+
+      features:
+        - "Environment-based configuration loading"
+        - "Nested configuration structures"
+        - "Support for multiple Kafka topics with naming pattern: crypto-listener-{topic-name}"
+        - "Support for multiple Kafka producers/consumers"
+        - "Validation on load"
+        - "TopicsConfig centralizes all Kafka topic names"
+        - "Environment variables: KAFKA_TOPIC_PRICES, KAFKA_TOPIC_SUBSCRIPTION_COMMANDS, KAFKA_TOPIC_UNSUBSCRIPTION_COMMANDS"
+
+  conventions:
+    - "All infrastructure types implement application ports (traits)"
+    - "Use Arc<Self> for shared ownership across async tasks"
+    - "Graceful shutdown hooks via shutdown() method on ports"
+    - "Health checks return InfraResult for readiness probes"
+    - "Batching adapters use decorator pattern over base publishers"
+    - "Feature flags control optional dependencies (binance-connector only)"
+    - "Kafka is always enabled and required for the application to run"
+    - "No database persistence of price data - all updates go to Kafka"
+    - "Generic Kafka producers/consumers use type parameters for message types"
+    - "Pluggable serialization via MessageSerializer/MessageDeserializer traits"
+    - "Multiple producers/consumers configured via HashMap in Settings"
+    - "Kafka configs stored in Settings with named keys (e.g., kafka_producers.prices)"
+    - "Bootstrap modules handle all initialization with retry logic and fallbacks"
+    - "Startup modules provide observability and user feedback"
+    - "Shutdown modules ensure graceful resource cleanup"
+    - "All Kafka topics follow naming pattern: crypto-listener-{topic-name}"
+    - "TopicsConfig provides centralized topic name management"
+
+  patterns:
+    - pattern: Adapter Pattern
+      usage: "Infrastructure types adapt external systems to port interfaces"
+      examples:
+        - binance_stream.rs
+        - kafka_price_publisher.rs
+        - postgres_market_state_store.rs
+
+    - pattern: Decorator Pattern
+      usage: "Batching decorator adds buffering logic transparently for Kafka publishing"
+      examples:
+        - batching_price_publisher.rs
+        - kafka/producers/batching_producer.rs
+
+    - pattern: Strategy Pattern
+      usage: "Feature flags select implementation at compile time (ActiveMarketStream alias); Pluggable serializers for Kafka messages"
+      examples:
+        - messaging/mod.rs
+        - kafka/common.rs (MessageSerializer/Deserializer)
+
+    - pattern: Singleton Pattern
+      usage: "Global metrics instance via Lazy static"
+      examples: [metrics.rs]
+
+    - pattern: Generic Programming
+      usage: "Type-safe Kafka producers/consumers for any message type"
+      examples:
+        - kafka/producers/base_producer.rs (KafkaProducer<T, S>)
+        - kafka/consumers/base_consumer.rs (KafkaConsumer<T, D, H>)
+
+    - pattern: Observer Pattern
+      usage: "MessageHandler processes consumed Kafka messages"
+      examples:
+        - kafka/consumers/subscription_consumer.rs
+
+    - pattern: Builder Pattern
+      usage: "Fluent component initialization in bootstrap modules"
+      examples:
+        - bootstrap/database.rs
+        - bootstrap/publisher.rs
+
+    - pattern: Null Object Pattern
+      usage: "NoopMarketStream provides safe fallback when WebSocket unavailable"
+      examples:
+        - bootstrap/market_stream.rs
+
+  interactions:
+    - from: infrastructure.messaging.binance_stream
+      to: external.binance
+      method: websocket
+      protocol: wss
+      direction: async
+      data_format: json
+    - from: infrastructure.messaging.kafka_price_publisher
+      to: external.kafka
+      method: kafka
+      direction: async
+      data_format: json
+    - from: infrastructure.persistence
+      to: external.postgres
+      method: db
+      protocol: postgres
+      direction: sync
+      data_format: sql
+      note: "Only for subscription persistence"
+    - from: infrastructure.messaging.batching_price_publisher
+      to: infrastructure.messaging.kafka_price_publisher
+      method: event
+      direction: async
+      data_format: rust_types
+    - from: infrastructure.bootstrap
+      to: infrastructure.messaging
+      method: initialization
+      direction: sync
+      note: "Bootstraps and validates components"
+    - from: infrastructure.startup
+      to: infrastructure.bootstrap
+      method: orchestration
+      direction: sync
+      note: "Coordinates startup sequence"
+    - from: infrastructure.shutdown
+      to: application.ports
+      method: cleanup
+      direction: async
+      note: "Graceful shutdown via port interfaces"
+
+  glossary_refs:
+    - term: Adapter
+      relevance: "Implements port interface for external system"
+      usage_locations: [src/infrastructure/messaging/, src/infrastructure/persistence/]
+    - term: Batching
+      relevance: "Accumulates events before flushing to reduce Kafka produce operations"
+      usage_locations:
+        - src/infrastructure/messaging/batching_price_publisher.rs
+    - term: WebSocket
+      relevance: "Real-time bidirectional protocol for Binance market data"
+      usage_locations: [src/infrastructure/messaging/binance_stream.rs]
+    - term: Bootstrap
+      relevance: "Component initialization with dependency injection and retry logic"
+      usage_locations: [src/infrastructure/bootstrap/]
+    - term: Graceful Shutdown
+      relevance: "Clean resource cleanup with flushing and timeouts"
+      usage_locations: [src/infrastructure/shutdown/graceful.rs]
+
+  notes:
+    - category: performance
+      note: "Batching reduces Kafka produce calls by accumulating updates; configurable via batch_interval_ms and batch_max_size"
+      priority: high
+    - category: architecture
+      note: "Kafka is required infrastructure - application will panic if Kafka bootstrap fails"
+      priority: high
+    - category: architecture
+      note: "Feature flag (binance-connector) controls WebSocket adapter implementation at compile time"
+      priority: medium
+    - category: simplification
+      note: "Removed price persistence to database - Kafka is the single source of truth for price updates"
+      priority: high
+    - category: future
+      note: "Add circuit breaker for Binance WebSocket reconnection logic"
+      priority: medium
+    - category: security
+      note: "WebSocket connections use TLS (rustls-tls-native-roots)"
+      priority: low
+    - category: architecture
+      note: "Bootstrap, startup, and shutdown modules follow single responsibility principle"
+      priority: high
+    - category: resilience
+      note: "NoopMarketStream fallback prevents application crash when WebSocket unavailable"
+      priority: high
+    - category: operations
+      note: "Startup banner provides immediate visibility into component health"
+      priority: high
+    - category: reliability
+      note: "Graceful shutdown with flush prevents data loss during restarts"
+      priority: high
+    - category: naming
+      note: "All Kafka topics follow pattern crypto-listener-{topic-name} for namespace isolation"
+      priority: high
+    - category: configuration
+      note: "Multiple topics supported via KAFKA_TOPIC_* environment variables and TopicsConfig struct"
+      priority: high
+
+  quality:
+    test_coverage: unknown
+    cyclomatic_complexity: medium
+    coupling: moderate
+    cohesion: high
+
+presentation:
+  description: |
+    Presentation layer handles HTTP API endpoints for subscription management,
+    health checks, and metrics. Built with Axum framework for async request handling.
+    Provides REST API for external clients to control market data subscriptions.
+
+  naming_style: snake_case
+
+  modules:
+    - name: http
+      path: src/presentation/http
+      purpose: "HTTP API with REST endpoints for subscription management and health monitoring"
+
+      directories:
+        - path: src/presentation/http
+          purpose: "HTTP routing, controllers, middleware, and response handling"
+          files:
+            - mod.rs
+            - router.rs
+            - responses.rs
+          key_types:
+            - AppState
+            - ApiResponse
+            - ErrorResponse
+
+        - path: src/presentation/http/controllers
+          purpose: "HTTP request handlers (currently minimal, logic in router)"
+          files:
+            - mod.rs
+
+        - path: src/presentation/http/middleware
+          purpose: "HTTP middleware for logging and request processing"
+          files:
+            - mod.rs
+            - logging.rs
+          key_types:
+            - LoggingMiddleware
+
+      dependencies:
+        internal: [application.ports, application.dtos, infrastructure.messaging.metrics, shared.utils]
+        external: [axum, serde_json, tokio]
+
+      exports:
+        types:
+          - app_router
+          - AppState
+          - ApiResponse
+
+      complexity: medium
+      lines_of_code: 220
+
+      features:
+        - "REST endpoints: POST /market/subscribe, POST /market/unsubscribe"
+        - "Read endpoints: GET /market/subscriptions, POST /market/subscriptions/clear"
+        - "Health endpoints: GET /health, GET /ready"
+        - "Metrics endpoint: GET /metrics (Prometheus-compatible text format)"
+        - "Sampled logging for high-frequency subscribe/unsubscribe operations"
+        - "Generic AppState with dependency injection for ports"
+        - "Typed JSON request/response handling"
+
+      endpoints:
+        - path: "/market/subscribe"
+          method: POST
+          purpose: "Subscribe to market data symbol"
+          request_type: SubscribeRequest
+          response_type: "ApiResponse<String>"
+
+        - path: "/market/unsubscribe"
+          method: POST
+          purpose: "Unsubscribe from market data symbol"
+          request_type: UnsubscribeRequest
+          response_type: "ApiResponse<String>"
+
+        - path: "/market/subscriptions"
+          method: GET
+          purpose: "List active subscriptions"
+          response_type: "ApiResponse<Vec<String>>"
+
+        - path: "/market/subscriptions/clear"
+          method: POST
+          purpose: "Clear all subscriptions"
+          response_type: "ApiResponse<String>"
+
+        - path: "/health"
+          method: GET
+          purpose: "Health check with metrics snapshot"
+          response_type: "ApiResponse<Value>"
+
+        - path: "/ready"
+          method: GET
+          purpose: "Readiness probe for Kubernetes"
+          response_type: "ApiResponse<Value>"
+
+        - path: "/metrics"
+          method: GET
+          purpose: "Prometheus-compatible metrics"
+          response_type: "text/plain"
+
+  conventions:
+    - "All handlers are async functions with Axum extractors"
+    - "AppState uses Arc for shared access across handlers"
+    - "Error responses use consistent ErrorResponse wrapper"
+    - "Success responses use ApiResponse<T> generic wrapper"
+    - "High-frequency operations use sampled logging to reduce log volume"
+    - "Health checks delegate to port health_check() methods"
+    - "Metrics exposed in Prometheus text format for observability"
+
+  patterns:
+    - pattern: Dependency Injection
+      usage: "AppState injects port implementations into handlers via Axum State extractor"
+      examples:
+        - router.rs (AppState struct)
+
+    - pattern: Result Wrapper
+      usage: "ApiResponse<T> wraps success/error responses uniformly"
+      examples:
+        - responses.rs
+
+  interactions:
+    - from: presentation.http
+      to: application.ports
+      method: REST
+      direction: sync
+      note: "HTTP handlers call port methods"
+
+    - from: presentation.http
+      to: infrastructure.messaging.metrics
+      method: event
+      direction: sync
+      note: "Expose METRICS singleton via /metrics endpoint"
+
+  glossary_refs:
+    - term: REST
+      relevance: "HTTP API design pattern for resource operations"
+      usage_locations:
+        - src/presentation/http/router.rs
+
+    - term: HealthCheck
+      relevance: "Kubernetes liveness and readiness probes"
+      usage_locations:
+        - src/presentation/http/router.rs
+
+  notes:
+    - category: observability
+      note: "Sampled logging prevents log flooding from high-frequency subscription changes"
+      priority: high
+    - category: operations
+      note: "Prometheus metrics enable Grafana dashboards and alerting"
+      priority: high
+    - category: kubernetes
+      note: "/ready endpoint used for pod readiness, /health for liveness"
+      priority: high
+
+  quality:
+    test_coverage: unknown
+    cyclomatic_complexity: low
+    coupling: loose
+    cohesion: high
+
+shared:
+  description: |
+    Shared layer provides cross-cutting concerns: error types, common traits,
+    utility functions, and type definitions used across all layers.
+    Contains no business logic, only reusable technical infrastructure.
+
+  naming_style: snake_case
+
+  modules:
+    - name: errors
+      path: src/shared/errors.rs
+      purpose: "Hierarchical error types for domain, application, and infrastructure layers"
+
+      directories:
+        - path: src/shared
+          purpose: "Error type definitions with thiserror derives"
+          files:
+            - errors.rs
+          key_types:
+            - DomainError
+            - ApplicationError
+            - InfrastructureError
+            - DomainResult
+            - AppResult
+            - InfraResult
+
+      dependencies:
+        internal: []
+        external: [thiserror, serde_json]
+
+      exports:
+        types:
+          - DomainError
+          - ApplicationError
+          - InfrastructureError
+          - DomainResult
+          - AppResult
+          - InfraResult
+
+      complexity: low
+      lines_of_code: 30
+
+    - name: types
+      path: src/shared/types.rs
+      purpose: "Common type definitions for event sourcing and domain modeling"
+
+      directories:
+        - path: src/shared
+          purpose: "Shared type definitions"
+          files:
+            - types.rs
+          key_types:
+            - EventVersion
+            - EventMetadata
+            - EventEnvelope
+            - Versioned
+
+      dependencies:
+        internal: []
+        external: [uuid, chrono, serde]
+
+      exports:
+        types:
+          - EventVersion
+          - EventMetadata
+          - EventEnvelope
+          - Versioned
+
+      complexity: low
+      lines_of_code: 40
+
+    - name: traits
+      path: src/shared/traits
+      purpose: "Common trait definitions (currently minimal, reserved for cross-cutting traits)"
+
+      directories:
+        - path: src/shared/traits
+          purpose: "Reusable trait definitions"
+          files:
+            - mod.rs
+
+      dependencies:
+        internal: []
+        external: []
+
+      complexity: low
+      lines_of_code: 10
+
+    - name: utils
+      path: src/shared/utils
+      purpose: "Utility functions for datetime handling, validation, and log sampling"
+
+      directories:
+        - path: src/shared/utils
+          purpose: "Helper functions and utilities"
+          files:
+            - mod.rs
+            - datetime.rs
+            - validation.rs
+            - log_sampling.rs
+          key_types:
+            - sampled_subscribe
+            - sampled_unsubscribe
+
+      dependencies:
+        internal: []
+        external: [chrono, tracing, parking_lot]
+
+      exports:
+        functions:
+          - sampled_subscribe
+          - sampled_unsubscribe
+
+      complexity: low
+      lines_of_code: 120
+
+      features:
+        - "Log sampling with configurable rate (default: 1 in 100)"
+        - "Thread-safe sampling counters with parking_lot"
+        - "DateTime utilities for timestamp handling"
+        - "Validation helpers for input sanitization"
+
+  conventions:
+    - "Error types use thiserror for automatic Display/Error implementations"
+    - "Result type aliases (DomainResult, AppResult, InfraResult) simplify signatures"
+    - "Error hierarchy follows layer boundaries (domain -> application -> infrastructure)"
+    - "Shared types are immutable and serializable where possible"
+    - "Utilities are pure functions without side effects (except logging)"
+    - "Log sampling prevents log flooding in high-throughput scenarios"
+
+  patterns:
+    - pattern: Error Hierarchy
+      usage: "Layered error types with From conversions for error propagation"
+      examples:
+        - errors.rs (DomainError -> ApplicationError -> InfrastructureError)
+
+    - pattern: Type Alias
+      usage: "Result<T, E> aliases reduce boilerplate"
+      examples:
+        - errors.rs (DomainResult, AppResult, InfraResult)
+
+  interactions:
+    - from: shared.errors
+      to: domain
+      method: event
+      direction: sync
+      note: "Domain uses DomainError and DomainResult"
+
+    - from: shared.errors
+      to: application
+      method: event
+      direction: sync
+      note: "Application uses ApplicationError, InfraResult"
+
+    - from: shared.errors
+      to: infrastructure
+      method: event
+      direction: sync
+      note: "Infrastructure uses InfrastructureError, InfraResult"
+
+    - from: shared.utils
+      to: presentation.http
+      method: event
+      direction: sync
+      note: "HTTP handlers use sampled logging functions"
+
+  glossary_refs:
+    - term: ErrorHierarchy
+      relevance: "Layered error types enable proper error handling at each architectural layer"
+      usage_locations:
+        - src/shared/errors.rs
+
+    - term: LogSampling
+      relevance: "Rate-limited logging for high-frequency events"
+      usage_locations:
+        - src/shared/utils/log_sampling.rs
+
+  notes:
+    - category: architecture
+      note: "Shared layer has no dependencies on other layers - only external crates"
+      priority: high
+    - category: performance
+      note: "Log sampling reduces I/O overhead for high-frequency operations"
+      priority: medium
+    - category: future
+      note: "Consider adding more reusable traits as patterns emerge"
+      priority: low
+
+  quality:
+    test_coverage: unknown
+    cyclomatic_complexity: low
+    coupling: none
+    cohesion: medium
+
+infrastructure.messaging.kafka:
+  description: |
+    Modular Kafka infrastructure providing generic, type-safe producers and consumers
+    with pluggable serialization. Supports JSON, Avro, and Protobuf formats.
+    Designed for reusability across multiple message types and topics.
+
+  naming_style: snake_case
+
+  modules:
+    - name: common
+      path: src/infrastructure/messaging/kafka/common.rs
+      purpose: "Shared types and serialization traits for Kafka messaging"
+
+      directories:
+        - path: src/infrastructure/messaging/kafka
+          purpose: "Common Kafka types and serialization contracts"
+          files:
+            - common.rs
+          key_types:
+            - KafkaMessage
+            - SerializationFormat
+            - MessageSerializer
+            - MessageDeserializer
+            - JsonSerializer
+            - JsonDeserializer
+
+      dependencies:
+        internal: [shared.errors]
+        external: [serde, serde_json]
+
+      exports:
+        types:
+          - KafkaMessage
+          - SerializationFormat
+          - MessageSerializer
+          - MessageDeserializer
+          - JsonSerializer
+          - JsonDeserializer
+
+      complexity: low
+      lines_of_code: 70
+
+      features:
+        - "Generic KafkaMessage<T> wrapper with key, value, headers"
+        - "Builder pattern for message construction (with_key, with_header)"
+        - "Pluggable serialization via MessageSerializer<T> trait"
+        - "Pluggable deserialization via MessageDeserializer<T> trait"
+        - "Built-in JSON serializer/deserializer implementations"
+        - "Support for Avro and Protobuf (format enumeration)"
+
+    - name: producers
+      path: src/infrastructure/messaging/kafka/producers
+      purpose: "Generic Kafka producer implementations with batching support"
+
+      directories:
+        - path: src/infrastructure/messaging/kafka/producers
+          purpose: "Producer infrastructure with base and specialized implementations"
+          files:
+            - mod.rs
+            - base_producer.rs
+            - batching_producer.rs
+            - price_producer.rs
+          key_types:
+            - KafkaProducerPort
+            - KafkaProducer
+            - BatchingKafkaProducer
+            - KafkaPriceProducer
+
+      dependencies:
+        internal: [application.ports, shared.errors, infrastructure.messaging.kafka.common, infrastructure.messaging.kafka.config]
+        external: [rdkafka, tokio, async-trait, tracing]
+
+      exports:
+        types:
+          - KafkaProducerPort
+          - KafkaProducer
+          - BatchingKafkaProducer
+          - KafkaPriceProducer
+
+      complexity: high
+      lines_of_code: 450
+
+      features:
+        - "Generic KafkaProducer<T, S> with type-safe message and serializer parameters"
+        - "Async channel-based message queue for non-blocking sends"
+        - "Background task for message publishing with retry logic"
+        - "Configurable batch size, linger time, compression, idempotence"
+        - "Bootstrap with retry attempts and backoff delays"
+        - "Batching decorator accumulates messages before flush"
+        - "Health checks validate producer connectivity"
+        - "Graceful shutdown with flush guarantee"
+
+    - name: consumers
+      path: src/infrastructure/messaging/kafka/consumers
+      purpose: "Generic Kafka consumer implementations with message handler pattern"
+
+      directories:
+        - path: src/infrastructure/messaging/kafka/consumers
+          purpose: "Consumer infrastructure with base and specialized implementations"
+          files:
+            - mod.rs
+            - base_consumer.rs
+            - subscription_consumer.rs
+          key_types:
+            - KafkaConsumerPort
+            - MessageHandler
+            - KafkaConsumer
+            - SubscriptionCommandConsumer
+
+      dependencies:
+        internal: [application.ports, shared.errors, infrastructure.messaging.kafka.common, infrastructure.messaging.kafka.config]
+        external: [rdkafka, tokio, async-trait, tracing]
+
+      exports:
+        types:
+          - KafkaConsumerPort
+          - MessageHandler
+          - KafkaConsumer
+
+      complexity: high
+      lines_of_code: 380
+
+      features:
+        - "Generic KafkaConsumer<T, D, H> with message type, deserializer, and handler parameters"
+        - "MessageHandler<T> trait for pluggable message processing logic"
+        - "Background task for continuous message consumption"
+        - "Configurable consumer group, auto-commit, offset reset strategy"
+        - "Multi-topic subscription support"
+        - "Start/stop lifecycle management with running flag"
+        - "Health checks validate consumer connectivity"
+        - "Error handling with structured logging"
+
+    - name: config
+      path: src/infrastructure/messaging/kafka/config.rs
+      purpose: "Configuration structures for Kafka producers and consumers"
+
+      directories:
+        - path: src/infrastructure/messaging/kafka
+          purpose: "Kafka configuration types"
+          files:
+            - config.rs
+          key_types:
+            - KafkaProducerConfig
+            - KafkaConsumerConfig
+
+      dependencies:
+        internal: []
+        external: [serde]
+
+      exports:
+        types:
+          - KafkaProducerConfig
+          - KafkaConsumerConfig
+
+      complexity: low
+      lines_of_code: 120
+
+      features:
+        - "Serde-compatible config structures for environment loading"
+        - "Producer config: brokers, topic, batch_size, linger_ms, compression, acks, idempotence"
+        - "Consumer config: brokers, topics, group_id, auto_offset_reset, enable_auto_commit"
+        - "Accessor methods with sensible defaults"
+        - "Retry configuration: max_retry_attempts, retry_backoff"
+
+  conventions:
+    - "All producers/consumers are generic over message types"
+    - "Serialization is pluggable via MessageSerializer/Deserializer traits"
+    - "Type safety enforced at compile time via generic parameters"
+    - "Bootstrap methods use Arc<Self> for shared ownership"
+    - "Background tasks spawned with tokio::spawn for async processing"
+    - "Health checks validate connectivity without message operations"
+    - "Configuration uses builder pattern with defaults"
+    - "Error handling uses InfraResult from shared.errors"
+
+  patterns:
+    - pattern: Generic Programming
+      usage: "Type-safe message producers/consumers for any serializable type"
+      examples:
+        - KafkaProducer<T, S>
+        - KafkaConsumer<T, D, H>
+
+    - pattern: Dependency Injection
+      usage: "Serializers and handlers injected as generic parameters"
+      examples:
+        - MessageSerializer<T>
+        - MessageHandler<T>
+
+    - pattern: Decorator Pattern
+      usage: "BatchingKafkaProducer wraps base producer with buffering logic"
+      examples:
+        - batching_producer.rs
+
+    - pattern: Strategy Pattern
+      usage: "Pluggable serialization strategies (JSON, Avro, Protobuf)"
+      examples:
+        - MessageSerializer trait with JsonSerializer implementation
+
+    - pattern: Observer Pattern
+      usage: "MessageHandler processes consumed messages"
+      examples:
+        - base_consumer.rs (MessageHandler<T> trait)
+
+  interactions:
+    - from: infrastructure.messaging.kafka.producers
+      to: external.kafka
+      method: kafka
+      direction: async
+      note: "Publish messages to Kafka topics"
+
+    - from: infrastructure.messaging.kafka.consumers
+      to: external.kafka
+      method: kafka
+      direction: async
+      note: "Consume messages from Kafka topics"
+
+    - from: infrastructure.messaging.kafka
+      to: infrastructure.messaging.kafka.common
+      method: event
+      direction: sync
+      note: "Use serialization traits and message wrappers"
+
+  glossary_refs:
+    - term: KafkaProducer
+      relevance: "Generic producer implementation with type-safe message publishing"
+      usage_locations:
+        - src/infrastructure/messaging/kafka/producers/base_producer.rs
+
+    - term: KafkaConsumer
+      relevance: "Generic consumer implementation with pluggable message handling"
+      usage_locations:
+        - src/infrastructure/messaging/kafka/consumers/base_consumer.rs
+
+    - term: MessageSerializer
+      relevance: "Trait for converting messages to bytes for Kafka publishing"
+      usage_locations:
+        - src/infrastructure/messaging/kafka/common.rs
+
+    - term: MessageDeserializer
+      relevance: "Trait for converting bytes to messages from Kafka consumption"
+      usage_locations:
+        - src/infrastructure/messaging/kafka/common.rs
+
+    - term: MessageHandler
+      relevance: "Trait for processing consumed Kafka messages"
+      usage_locations:
+        - src/infrastructure/messaging/kafka/consumers/base_consumer.rs
+
+  notes:
+    - category: architecture
+      note: "Generic Kafka infrastructure enables reuse for any message type"
+      priority: high
+    - category: extensibility
+      note: "Pluggable serialization supports JSON, Avro, Protobuf formats"
+      priority: high
+    - category: performance
+      note: "Batching producer reduces Kafka produce calls for high-throughput scenarios"
+      priority: high
+    - category: resilience
+      note: "Bootstrap retry logic handles transient Kafka connection failures"
+      priority: high
+    - category: type_safety
+      note: "Compile-time type checking prevents runtime serialization errors"
+      priority: high
+
+  quality:
+    test_coverage: unknown
+    cyclomatic_complexity: medium
+    coupling: loose
+    cohesion: high
+
+# ============================================================
+# API AND CONTRACTS MAP
+# ============================================================
+api_contracts:
+  description: |
+    Complete mapping of all REST endpoints and Kafka topics in the crypto-listener system.
+    Price updates flow from Binance WebSocket → Kafka topics.
+    HTTP API manages subscriptions to market data symbols.
+
+  # ─────────────────────────────────────────────────────────
+  # REST ENDPOINTS
+  # ─────────────────────────────────────────────────────────
+  rest_api:
+    base_url: http://localhost:8080
+    version: v1
+    default_content_type: application/json
+
+    authentication:
+      type: none
+      note: "Currently no authentication - designed for internal service use"
+
+    endpoints:
+      # ── Market Subscriptions ────────────────────────────
+      - path: /market/subscribe
+        method: POST
+        summary: "Subscribe to market data symbol"
+        owner_module: presentation::http::router::subscribe_symbol
+        auth_required: false
+        
+        request:
+          content_type: application/json
+          body_schema: |
+            {
+              "symbol": "string"  // required, e.g., "BTCUSDT"
+            }
+          validation_rules:
+            - "symbol cannot be empty"
+
+        responses:
+          - status: 200
+            description: "Successfully subscribed"
+            body_schema: |
+              {
+                "success": true,
+                "data": "subscribed BTCUSDT"
+              }
+          - status: 500
+            description: "Subscribe error"
+            error_code: "SUBSCRIBE_ERROR"
+
+        side_effects:
+          - "Connects to Binance WebSocket for symbol"
+          - "Persists subscription to PostgreSQL if store enabled"
+          - "Emits sampled log entry (1 in 100)"
+
+      - path: /market/unsubscribe
+        method: POST
+        summary: "Unsubscribe from market data symbol"
+        owner_module: presentation::http::router::unsubscribe_symbol
+        auth_required: false
+        
+        request:
+          content_type: application/json
+          body_schema: |
+            {
+              "symbol": "string"  // required
+            }
+
+        responses:
+          - status: 200
+            description: "Successfully unsubscribed"
+            body_schema: |
+              {
+                "success": true,
+                "data": "unsubscribed BTCUSDT"
+              }
+          - status: 500
+            description: "Unsubscribe error"
+
+        side_effects:
+          - "Disconnects from Binance WebSocket for symbol"
+          - "Removes subscription from PostgreSQL if store enabled"
+          - "Emits sampled log entry (1 in 100)"
+
+      - path: /market/subscriptions
+        method: GET
+        summary: "List all active subscriptions"
+        owner_module: presentation::http::router::get_subscriptions
+        auth_required: false
+        
+        responses:
+          - status: 200
+            body_schema: |
+              {
+                "success": true,
+                "data": ["BTCUSDT", "ETHUSDT"]
+              }
+          - status: 500
+            description: "Database error"
+
+      - path: /market/subscriptions/clear
+        method: POST
+        summary: "Clear all subscriptions"
+        owner_module: presentation::http::router::clear_subscriptions
+        auth_required: false
+        
+        responses:
+          - status: 200
+            description: "All subscriptions cleared"
+          - status: 500
+            description: "Clear error"
+
+        side_effects:
+          - "Unsubscribes from all WebSocket connections"
+          - "Clears all subscriptions from database"
+
+      # ── Health Checks ───────────────────────────────────
+      - path: /health
+        method: GET
+        summary: "Health check with metrics snapshot"
+        owner_module: presentation::http::router::health
+        auth_required: false
+        
+        responses:
+          - status: 200
+            body_schema: |
+              {
+                "success": true,
+                "data": {
+                  "status": "ok",
+                  "metrics": {
+                    "published": 0,
+                    "batches_flushed": 0,
+                    "reconnects": 0,
+                    "queued": 0,
+                    "uptime_ms": 12345,
+                    "sampling_total_events": 100,
+                    "sampling_sampled_events": 1
+                  }
+                }
+              }
+
+      - path: /ready
+        method: GET
+        summary: "Readiness probe for Kubernetes"
+        owner_module: presentation::http::router::ready
+        auth_required: false
+        
+        responses:
+          - status: 200
+            description: "Service ready"
+            body_schema: |
+              {
+                "success": true,
+                "data": {
+                  "status": "ready"
+                }
+              }
+          - status: 503
+            description: "Service not ready (Kafka or WebSocket unavailable)"
+
+      - path: /metrics
+        method: GET
+        summary: "Prometheus-compatible metrics"
+        owner_module: presentation::http::router::metrics
+        auth_required: false
+        
+        responses:
+          - status: 200
+            content_type: text/plain; version=0.0.4
+            description: "Prometheus metrics in text format"
+            body_schema: |
+              # HELP listener_published_total Total price updates published
+              # TYPE listener_published_total counter
+              listener_published_total 0
+              # HELP listener_batches_flushed_total Total batches flushed
+              # TYPE listener_batches_flushed_total counter
+              listener_batches_flushed_total 0
+              # HELP listener_reconnects_total Total websocket reconnects
+              # TYPE listener_reconnects_total counter
+              listener_reconnects_total 0
+              # HELP listener_queue_items Current queued items awaiting batch
+              # TYPE listener_queue_items gauge
+              listener_queue_items 0
+              # HELP listener_uptime_ms Process uptime in milliseconds
+              # TYPE listener_uptime_ms gauge
+              listener_uptime_ms 12345
+              # HELP listener_sampling_total_events Total events considered for sampling
+              # TYPE listener_sampling_total_events counter
+              listener_sampling_total_events 100
+              # HELP listener_sampling_sampled_events Total events that were actually sampled/logged
+              # TYPE listener_sampling_sampled_events counter
+              listener_sampling_sampled_events 1
+
+    error_format:
+      schema: |
+        {
+          "success": false,
+          "error": {
+            "error": "Human readable message"
+          }
+        }
+
+  # ─────────────────────────────────────────────────────────
+  # KAFKA TOPICS
+  # ─────────────────────────────────────────────────────────
+  kafka:
+    cluster: crypto-listener-cluster
+    bootstrap_servers: ["kafka:9092"]
+    
+    naming_convention: "crypto-listener-{topic-name}"
+    
+    default_config:
+      partitions: 3
+      replication_factor: 1
+      retention_ms: 604800000  # 7 days
+      cleanup_policy: delete
+
+    serialization:
+      key: string  # Symbol name
+      value: json
+      schema_registry: "Schema registry optional, not currently used"
+
+    # ── TOPICS PUBLISHED (Producer) ─────────────────────
+    topics_published:
+      - topic: crypto-listener-prices
+        description: "Real-time price updates from Binance market data"
+        owner_module: infrastructure::messaging::kafka_price_publisher
+        
+        trigger: "Price change from Binance WebSocket exceeds min_price_change_percent threshold"
+        frequency: "High volume - varies by market activity (potentially 100s/sec)"
+        
+        partitioning:
+          strategy: by_key
+          key: symbol
+          reason: "Ensure ordered delivery per trading pair"
+        
+        schema:
+          version: v1
+          fields:
+            - name: symbol
+              type: string
+              required: true
+              description: "Trading pair (e.g., BTCUSDT)"
+            - name: price
+              type: string
+              required: true
+              description: "Current price as decimal string"
+            - name: event_time
+              type: integer
+              required: true
+              description: "Binance event timestamp (milliseconds)"
+            - name: last_price_change_percent
+              type: number
+              required: false
+              description: "Price change percentage"
+        
+        consumers:
+          - service: downstream-analytics
+            consumer_group: analytics-prices
+            purpose: "Price analytics and reporting"
+          - service: downstream-alerting
+            consumer_group: alerting-prices
+            purpose: "Price alert triggers"
+
+      - topic: crypto-listener-subscription-commands
+        description: "Commands to subscribe to market data symbols"
+        owner_module: application::dtos::commands::SubscribeCommand
+        
+        trigger: "External service needs to subscribe to symbol"
+        frequency: "Low - manual or scheduled subscription changes"
+        
+        schema:
+          version: v1
+          fields:
+            - name: symbol
+              type: string
+              required: true
+              description: "Trading pair to subscribe"
+            - name: request_id
+              type: string
+              required: true
+              description: "UUID for request tracking"
+            - name: timestamp
+              type: integer
+              required: true
+              description: "Command timestamp (milliseconds)"
+            - name: user_id
+              type: string
+              required: false
+              description: "Optional user identifier"
+        
+        consumers:
+          - service: crypto-listener
+            consumer_group: listener-subscription-handler
+            purpose: "Process subscription commands"
+
+      - topic: crypto-listener-unsubscription-commands
+        description: "Commands to unsubscribe from market data symbols"
+        owner_module: application::dtos::commands::UnsubscribeCommand
+        
+        trigger: "External service needs to unsubscribe from symbol"
+        frequency: "Low - manual or scheduled subscription changes"
+        
+        schema:
+          version: v1
+          fields:
+            - name: symbol
+              type: string
+              required: true
+              description: "Trading pair to unsubscribe"
+            - name: request_id
+              type: string
+              required: true
+              description: "UUID for request tracking"
+            - name: timestamp
+              type: integer
+              required: true
+              description: "Command timestamp (milliseconds)"
+            - name: user_id
+              type: string
+              required: false
+              description: "Optional user identifier"
+        
+        consumers:
+          - service: crypto-listener
+            consumer_group: listener-unsubscription-handler
+            purpose: "Process unsubscription commands"
+
+    # ── TOPICS CONSUMED (Consumer) ─────────────────────
+    topics_consumed: []
+    note: "crypto-listener is primarily a producer service - consumers TBD"
+
+    # ── MONITORING ─────────────────────────────────────
+    monitoring:
+      consumer_lag_alert:
+        warning_threshold: 1000
+        critical_threshold: 10000
+        
+      throughput_baseline:
+        crypto-listener-prices: "Varies by market activity"
+
+# ============================================================
+# DATA AND MODELS MAP
+# ============================================================
+data_model:
+  persistence_strategy: hybrid
+  note: "Event sourcing infrastructure present but minimal domain usage. Subscriptions use CRUD."
+
+  entities:
+    - name: PriceUpdate
+      type: value_object
+      layer: application
+      description: "Immutable price update event from market data stream"
+
+      attributes:
+        - name: symbol
+          type: String
+          nullable: false
+          indexed: true
+          pii: false
+        - name: price
+          type: String
+          nullable: false
+          indexed: false
+          pii: false
+          note: "Decimal stored as string to avoid floating-point precision issues"
+        - name: event_time
+          type: i64
+          nullable: false
+          indexed: false
+          pii: false
+          note: "Milliseconds since epoch"
+        - name: last_price_change_percent
+          type: Option<f64>
+          nullable: true
+          indexed: false
+          pii: false
+
+      events_emitted: []
+      note: "PriceUpdate is the core data type - published to Kafka immediately"
+
+  dtos:
+    - name: SubscribeRequest
+      layer: presentation
+      purpose: "HTTP API request to subscribe to symbol"
+      source: HTTP POST /market/subscribe
+      target: MarketDataStreamPort
+      mappings:
+        - from: json.symbol
+          to: dto.symbol
+
+    - name: UnsubscribeRequest
+      layer: presentation
+      purpose: "HTTP API request to unsubscribe from symbol"
+      source: HTTP POST /market/unsubscribe
+      target: MarketDataStreamPort
+      mappings:
+        - from: json.symbol
+          to: dto.symbol
+
+    - name: SubscribeCommand
+      layer: application
+      purpose: "Kafka command message for subscription"
+      source: Kafka topic crypto-listener-subscription-commands
+      target: MarketDataStreamPort
+      mappings:
+        - from: kafka.symbol
+          to: command.symbol
+        - from: kafka.request_id
+          to: command.request_id
+        - from: kafka.timestamp
+          to: command.timestamp
+        - from: kafka.user_id
+          to: command.user_id
+
+    - name: UnsubscribeCommand
+      layer: application
+      purpose: "Kafka command message for unsubscription"
+      source: Kafka topic crypto-listener-unsubscription-commands
+      target: MarketDataStreamPort
+      mappings:
+        - from: kafka.symbol
+          to: command.symbol
+
+  database_schemas:
+    - schema_name: public
+      database: PostgreSQL
+      tables:
+        - name: events
+          primary_key: [id]
+          foreign_keys: []
+          indexes:
+            - columns: [aggregate_id]
+              type: btree
+            - columns: [aggregate_id, sequence]
+              type: unique
+          partitioning: none
+          estimated_rows: 0
+          growth_rate: none
+          note: "Event store table - currently unused in production flow"
+
+        - name: users_projection
+          primary_key: [user_id]
+          foreign_keys: []
+          indexes: []
+          partitioning: none
+          estimated_rows: 0
+          growth_rate: none
+          note: "Projection table - currently unused"
+
+        - name: market_subscriptions
+          primary_key: [symbol]
+          foreign_keys: []
+          indexes: []
+          partitioning: none
+          estimated_rows: 100
+          growth_rate: low
+          note: "Stores active symbol subscriptions for recovery after restart"
+
+  data_migrations:
+    - id: V001__initial_schema
+      applied_at: "Project inception"
+      description: "Initial event store schema"
+      rollback_available: no
+
+    - id: V002__market_state_store
+      applied_at: "2024"
+      description: "Add market_subscriptions table"
+      rollback_available: no
+
+    - id: V003__timescale_features
+      applied_at: "2024"
+      description: "Add TimescaleDB extension preparation"
+      rollback_available: no
+
+    - id: V004__timescale_hypertable_and_policies
+      applied_at: "2024"
+      description: "Convert price_updates to hypertable (later dropped)"
+      rollback_available: no
+
+    - id: V005__drop_price_updates
+      applied_at: "2024"
+      description: "Remove price_updates table - Kafka is source of truth"
+      rollback_available: no
+      breaking_change: yes
+
+    - id: V006__rename_volume_to_quantity
+      applied_at: "2024"
+      description: "Rename volume column to quantity"
+      rollback_available: no
+
+    - id: V007__drop_last_prices_table
+      applied_at: "2024"
+      description: "Drop last_prices table - not needed"
+      rollback_available: no
+
+# ============================================================
+# SECURITY AND COMPLIANCE
+# ============================================================
+security:
+  authentication:
+    strategy: none
+    note: "Internal service - no authentication currently implemented"
+    provider: none
+    token_lifetime: N/A
+    refresh_enabled: no
+
+  authorization:
+    model: none
+    note: "All endpoints are public - designed for internal network use"
+
+  data_protection:
+    encryption:
+      at_rest: no
+      note: "Database contains only subscription metadata, no sensitive data"
+
+      at_transit: yes
+      protocol: TLS_1.3
+      note: "Binance WebSocket uses WSS (TLS), Kafka can use TLS if configured"
+
+    pii_fields: []
+    note: "No personally identifiable information stored or processed"
+
+    data_retention:
+      - data_type: kafka_price_updates
+        retention_period: 7_days
+        deletion_method: automated
+        note: "Configured via Kafka topic retention policy"
+
+      - data_type: subscription_metadata
+        retention_period: indefinite
+        deletion_method: manual
+        note: "Only symbol names stored"
+
+  compliance:
+    regulations: []
+    note: "Market data service - no specific compliance requirements"
+
+    audit_logging:
+      enabled: yes
+      events_tracked:
+        - price_update_published
+        - websocket_reconnection
+        - subscription_changes
+        - error_events
+      retention: based_on_log_aggregation_system
+      storage: structured_json_logs
+      note: "Uses tracing framework with JSON output"
+
+  vulnerabilities:
+    scanning_frequency: on_commit
+    tools: [cargo-audit, dependabot]
+    note: "GitHub Dependabot enabled for dependency scanning"
+
+    known_issues: []
+
+# ============================================================
+# TESTING STRATEGY
+# ============================================================
+testing_strategy:
+  test_pyramid:
+    unit_tests:
+      coverage_target: 70%
+      current_coverage: unknown
+      framework: cargo_test
+      location: src/**/*
+      naming_convention: "test_<scenario>_<expected_result>"
+
+      mocking_strategy: manual_mocks
+      note: "Minimal unit tests - focus on integration testing"
+
+    integration_tests:
+      coverage_target: 60%
+      current_coverage: unknown
+      location: tests/integration/**
+
+      test_databases:
+        - type: postgres_testcontainers
+          setup: planned
+          cleanup: per_test
+          note: "Not yet implemented"
+
+      external_mocks:
+        - service: binance_websocket
+          tool: manual_mock
+          scenarios: [success, disconnect, reconnect]
+
+        - service: kafka
+          tool: manual_mock
+          verification: call_count
+
+    e2e_tests:
+      coverage_target: 30%
+      current_coverage: minimal
+      location: tests/e2e/**
+
+      test_env:
+        deployment: docker-compose
+        services: [app, postgres, kafka, binance_mock]
+        data_seeding: fixtures
+
+      critical_flows:
+        - "Subscribe → Receive WebSocket data → Publish to Kafka"
+        - "WebSocket disconnect → Reconnect → Resume publishing"
+        - "Filter price updates by threshold"
+
+  test_data_management:
+    fixtures:
+      location: tests/fixtures/**
+      format: rust_factory_functions
+
+      examples:
+        - name: valid_subscribe_request
+          file: tests/helpers/fixtures.rs
+          usage: "HTTP subscription tests"
+
+    factories:
+      - name: PriceUpdateFactory
+        module: tests::helpers::fixtures
+        purpose: "Generate price updates with random valid data"
+        customization: "Allows override of symbol, price, timestamp"
+
+  performance_tests:
+    load_testing:
+      tool: planned
+      note: "Performance testing not yet implemented"
+
+    benchmarks:
+      framework: none
+      location: none
+      note: "Benchmarking planned for future"
+
+  mutation_testing:
+    tool: none
+    note: "Mutation testing not implemented"
+
+# ============================================================
+# ERROR HANDLING AND OBSERVABILITY
+# ============================================================
+error_handling:
+  error_hierarchy:
+    - name: DomainError
+      layer: domain
+      variants:
+        - Validation
+        - NotFound
+        - Concurrency
+      propagation: "Wrapped by ApplicationError, never exposed directly"
+
+    - name: ApplicationError
+      layer: application
+      wraps: [DomainError, InfrastructureError]
+      variants:
+        - Domain
+        - Infrastructure
+        - Serde
+      propagation: "Converts to HTTP status codes in presentation layer"
+
+    - name: InfrastructureError
+      layer: infrastructure
+      variants:
+        - Database
+        - EventStore
+        - Io
+        - Messaging
+        - WebSocket
+        - Kafka
+        - Serialization
+      propagation: "Wrapped by ApplicationError"
+
+  error_conversion:
+    - from: InfrastructureError::WebSocket
+      to: Application continues with reconnection
+      message_strategy: log_details
+      logged_context: "Reconnection attempt, symbol, error message"
+
+    - from: InfrastructureError::Kafka
+      to: Application panic (Kafka required)
+      message_strategy: expose_details
+      logged_context: "Kafka broker, topic, error"
+
+    - from: InfrastructureError::Database
+      to: Application continues with degraded functionality
+      message_strategy: log_warning
+      logged_context: "Query, error message"
+
+  recovery_strategies:
+    - error_type: WebSocketTimeout
+      strategy: retry_with_backoff
+      max_attempts: 10
+      backoff: exponential
+      fallback: NoopMarketStream
+
+    - error_type: DatabaseConnectionFailed
+      strategy: retry_with_backoff
+      max_attempts: 5
+      backoff: linear_2000ms
+      fallback: continue_without_persistence
+
+    - error_type: KafkaConnectionFailed
+      strategy: panic
+      max_attempts: N/A
+      note: "Kafka is required infrastructure"
+
+  observability:
+    logging:
+      framework: tracing
+      levels:
+        - level: ERROR
+          conditions: "Unrecoverable errors, max retry attempts reached"
+          includes: [error_message, context, symbol]
+
+        - level: WARN
+          conditions: "Recoverable errors, retry attempts, degradation"
+          includes: [attempt_count, retry_delay, error_type]
+
+        - level: INFO
+          conditions: "Lifecycle events, subscriptions, connections"
+          includes: [event_type, symbol, timestamp]
+
+        - level: DEBUG
+          conditions: "Detailed flow information"
+          includes: [websocket_messages, kafka_produce_details]
+
+      structured_logging: yes
+      correlation_id: not_implemented
+      pii_scrubbing: not_applicable
+      note: "JSON structured logs via tracing-subscriber"
+
+    metrics:
+      backend: prometheus
+      collection_method: /metrics endpoint
+
+      business_metrics:
+        - name: listener_published_total
+          type: counter
+          labels: []
+          description: "Total price updates published to Kafka"
+
+        - name: listener_batches_flushed_total
+          type: counter
+          labels: []
+          description: "Total batches flushed"
+
+      technical_metrics:
+        - name: listener_reconnects_total
+          type: counter
+          labels: []
+          description: "Total WebSocket reconnections"
+
+        - name: listener_queue_items
+          type: gauge
+          labels: []
+          description: "Current queued items awaiting batch"
+
+        - name: listener_uptime_ms
+          type: gauge
+          labels: []
+          description: "Process uptime in milliseconds"
+
+        - name: listener_sampling_total_events
+          type: counter
+          labels: []
+          description: "Total events considered for log sampling"
+
+        - name: listener_sampling_sampled_events
+          type: counter
+          labels: []
+          description: "Total events actually logged after sampling"
+
+      sli_slo:
+        - metric: websocket_reconnection_success_rate
+          slo: "> 95%"
+          current: unknown
+
+        - metric: kafka_publish_success_rate
+          slo: "> 99.9%"
+          current: unknown
+
+    tracing:
+      backend: none
+      note: "Distributed tracing not implemented"
+
+    alerting:
+      channels: []
+      note: "Alerting not configured - metrics available via Prometheus"
+
+# ============================================================
+# DESIGN PATTERNS AND ANTI-PATTERNS
+# ============================================================
+design_patterns:
+  architectural_patterns:
+    - pattern: Ports and Adapters (Hexagonal)
+      usage: "Isolate application logic from infrastructure"
+      locations: [application::ports, infrastructure::messaging, infrastructure::persistence]
+      benefits: "Testability, adapter swapping (binance-connector feature)"
+      tradeoffs: "More abstractions, trait complexity"
+
+    - pattern: Event-Driven Architecture
+      usage: "Price updates flow as events to Kafka"
+      locations: [infrastructure::messaging::kafka_price_publisher]
+      benefits: "Decoupling, scalability, replay capability"
+      tradeoffs: "Eventual consistency, monitoring complexity"
+
+  creational_patterns:
+    - pattern: Builder
+      usage: "Settings configuration with defaults"
+      example_module: infrastructure::config::settings
+      scenario: "Complex configuration with multiple optional fields"
+
+    - pattern: Factory
+      usage: "Bootstrap modules create and configure components"
+      example_module: infrastructure::bootstrap
+      scenario: "Database, publisher, market stream initialization"
+
+  behavioral_patterns:
+    - pattern: Strategy
+      usage: "Feature flag selects WebSocket implementation"
+      example_module: infrastructure::messaging::mod
+      implementations: [BinanceMarketDataStream, BinanceConnectorMarketDataStream]
+      note: "ActiveMarketStream type alias chosen at compile time"
+
+    - pattern: Decorator
+      usage: "BatchingPricePublisher wraps KafkaPricePublisher"
+      example_module: infrastructure::messaging::batching_price_publisher
+      scenario: "Add batching logic without modifying base publisher"
+
+    - pattern: Observer
+      usage: "Market stream emits price updates to publisher"
+      example_module: infrastructure::messaging::binance_stream
+      scenario: "Async stream processing with callbacks"
+
+  anti_patterns:
+    known_code_smells:
+      - smell: Feature Flag Complexity
+        location: infrastructure::messaging::mod
+        impact: low
+        description: "Two WebSocket implementations with compile-time selection"
+        remediation: "Consider runtime strategy pattern if more implementations needed"
+        status: acceptable
+
+      - smell: Minimal Domain Layer
+        location: domain/*
+        impact: medium
+        description: "Domain layer mostly empty - business logic in infrastructure"
+        remediation: "Acceptable for data pipeline service - no complex domain rules"
+        status: acceptable
+
+    architectural_debt:
+      - debt: No Distributed Tracing
+        affected_modules: [all]
+        description: "No correlation IDs or tracing across components"
+        impact: "Difficult to debug flow across services"
+        effort_estimate: 16h
+        priority: medium
+
+      - debt: Limited Test Coverage
+        affected_modules: [all]
+        description: "Minimal unit and integration tests"
+        impact: "Risk of regressions"
+        effort_estimate: 40h
+        priority: high
+
+  refactoring_queue: []
+
+# ============================================================
+# COMMON IMPORTS PER LAYER
+# ============================================================
+common_imports:
+  description: |
+    Standard import patterns for crypto-listener Rust project.
+    Use this to ensure consistency and avoid dependency violations.
+
+  by_layer:
+    domain:
+      description: "Domain layer - pure business logic"
+      internal_imports:
+        - use crate::domain::errors::*;
+        - use crate::shared::errors::*;
+      
+      external_packages:
+        allowed:
+          - name: chrono
+            usage: "Date/time types"
+          - name: uuid
+            usage: "Unique identifiers"
+          - name: serde
+            usage: "Serialization for domain events"
+          - name: thiserror
+            usage: "Domain error definitions"
+
+        forbidden:
+          - pattern: sqlx
+            reason: "Domain doesn't know about database"
+          - pattern: axum
+            reason: "Domain doesn't know about HTTP"
+          - pattern: rdkafka
+            reason: "Domain doesn't know about messaging"
+          - pattern: crate::infrastructure
+            reason: "Violates dependency inversion"
+
+    application:
+      description: "Application layer - use case orchestration"
+      internal_imports:
+        - use crate::domain::*;
+        - use crate::application::ports::*;
+        - use crate::application::dtos::*;
+        - use crate::shared::errors::*;
+
+      external_packages:
+        allowed:
+          - name: async_trait
+            usage: "Async trait support"
+          - name: serde
+            usage: "DTO serialization"
+          - name: uuid
+            usage: "Request IDs"
+          - name: chrono
+            usage: "Timestamps"
+
+        forbidden:
+          - pattern: sqlx
+            reason: "Use ports/adapters"
+          - pattern: rdkafka
+            reason: "Use ports/adapters"
+          - pattern: crate::infrastructure
+            reason: "Access via port traits only"
+
+    infrastructure:
+      description: "Infrastructure layer - technical implementations"
+      internal_imports:
+        - use crate::application::ports::*;
+        - use crate::shared::errors::*;
+        - use crate::infrastructure::config::*;
+
+      external_packages:
+        allowed:
+          - name: sqlx
+            usage: "Database access"
+          - name: axum
+            usage: "HTTP framework (presentation only)"
+          - name: rdkafka
+            usage: "Kafka client"
+          - name: tokio
+            usage: "Async runtime"
+          - name: tokio_tungstenite
+            usage: "WebSocket client"
+          - name: tracing
+            usage: "Logging"
+
+        forbidden: []
+
+    presentation:
+      description: "Presentation layer - HTTP handlers"
+      internal_imports:
+        - use crate::application::ports::*;
+        - use crate::application::dtos::*;
+
+      external_packages:
+        allowed:
+          - name: axum
+            usage: "HTTP routing and handlers"
+          - name: serde_json
+            usage: "JSON serialization"
+
+        forbidden:
+          - pattern: crate::domain::aggregates
+            reason: "Use DTOs, not domain entities"
+
+  prelude_pattern:
+    description: "No prelude module - explicit imports preferred"
+    location: none
+
+# ============================================================
+# PROJECT DON'T DO RULES
+# ============================================================
+project_donts:
+  description: |
+    Forbidden practices in crypto-listener Rust project.
+    These rules must be checked before generating code.
+
+  critical:
+    - id: DONT-001
+      rule: "NEVER silently ignore errors with let _ = or .ok()"
+      reason: "Hides bugs, makes debugging impossible"
+      applies_to: [domain, application, infrastructure]
+      exceptions: ["Intentional fire-and-forget with documented reason"]
+      language_examples:
+        rust: |
+          // ❌ let _ = do_something();
+          // ❌ do_something().ok();
+          // ✅ do_something()?;
+          // ✅ if let Err(e) = do_something() { tracing::error!("Failed: {e}"); }
+
+    - id: DONT-002
+      rule: "NEVER import infrastructure in domain"
+      reason: "Violates hexagonal architecture"
+      applies_to: [domain]
+      language_examples:
+        rust: |
+          // ❌ use crate::infrastructure::*;
+          // ❌ use sqlx::*;
+          // ✅ Use traits defined in application::ports
+
+    - id: DONT-003
+      rule: "NEVER log full user objects or sensitive data"
+      reason: "Potential PII exposure"
+      applies_to: [all]
+      sensitive_fields: [password, token, api_key, email, user_id]
+      language_examples:
+        rust: |
+          // ❌ tracing::info!("User: {:?}", user);
+          // ✅ tracing::info!(user_id = %user.id, "User login");
+
+    - id: DONT-004
+      rule: "NEVER hardcode secrets, API keys, or production URLs"
+      reason: "Security risk"
+      applies_to: [all]
+      language_examples:
+        rust: |
+          // ❌ const API_KEY: &str = "sk_live_abc123";
+          // ✅ std::env::var("API_KEY")?;
+
+  high:
+    - id: DONT-005
+      rule: "NEVER use String for domain concepts - create newtype wrappers"
+      reason: "Type safety, prevents mixing symbols with other strings"
+      applies_to: [domain, application]
+      language_examples:
+        rust: |
+          // ❌ fn subscribe(symbol: String)
+          // ✅ struct Symbol(String); fn subscribe(symbol: Symbol)
+
+    - id: DONT-006
+      rule: "NEVER panic in production code except for unrecoverable errors"
+      reason: "Crashes the service"
+      applies_to: [infrastructure, application]
+      exceptions: ["Bootstrap failures where service cannot function"]
+      language_examples:
+        rust: |
+          // ❌ .unwrap()
+          // ❌ .expect("message")
+          // ✅ .map_err(|e| InfrastructureError::Database(e.to_string()))?
+
+    - id: DONT-007
+      rule: "NEVER leave TODO without issue reference"
+      reason: "Orphaned TODOs are forgotten"
+      applies_to: [all]
+      language_examples:
+        rust: |
+          // ❌ TODO: implement this later
+          // ✅ // TODO(#123): implement retry logic
+
+  medium:
+    - id: DONT-008
+      rule: "AVOID wildcard imports except for well-known preludes"
+      reason: "Makes code harder to trace"
+      applies_to: [all]
+      exceptions: ["std::prelude::*", "test preludes"]
+      language_examples:
+        rust: |
+          // ❌ use crate::domain::*;
+          // ✅ use crate::domain::{Aggregate, Event};
+
+    - id: DONT-009
+      rule: "AVOID obvious comments that just repeat code"
+      reason: "Noise, become stale"
+      applies_to: [all]
+      language_examples:
+        rust: |
+          // ❌ // Increment counter
+          //    counter += 1;
+          // ✅ // Retry limit based on partner SLA
+          //    const MAX_RETRIES: u32 = 3;
+
+  project_specific:
+    - id: DONT-P001
+      rule: "NEVER store price updates in database"
+      reason: "Kafka is the single source of truth for price data"
+      applies_to: [infrastructure::persistence]
+      correct_pattern: |
+        // ✅ Publish to Kafka only
+        publisher.publish(price_update).await?;
+        
+        // ❌ Store in database
+        // db.insert_price(price_update).await?;
+
+    - id: DONT-P002
+      rule: "NEVER disable WebSocket reconnection logic"
+      reason: "Service must be resilient to network issues"
+      applies_to: [infrastructure::messaging]
+      correct_pattern: |
+        // ✅ Retry with backoff
+        for attempt in 1..=max_attempts {
+            match connect().await {
+                Ok(conn) => return Ok(conn),
+                Err(e) => tracing::warn!("Retry {}/{}", attempt, max_attempts),
+            }
+        }
+
+# ============================================================
+# CONSISTENCY VALIDATION
+# ============================================================
+consistency_validation:
+  description: |
+    Validation rules for code generation and projectmap.yaml consistency.
+
+  pre_generation_checks:
+    - check: architecture_compliance
+      description: "Verify imports respect layer boundaries"
+      validation: |
+        - domain can import: shared only
+        - application can import: domain, shared
+        - infrastructure can import: application, domain, shared
+        - presentation can import: application, shared
+
+    - check: naming_convention
+      description: "Verify snake_case for modules, files, functions"
+      validation: |
+        - Files: snake_case.rs
+        - Modules: snake_case
+        - Structs/Enums: PascalCase
+        - Functions: snake_case
+        - Constants: SCREAMING_SNAKE_CASE
+
+    - check: forbidden_patterns
+      description: "Check for forbidden imports"
+      validation: |
+        - Domain MUST NOT import infrastructure
+        - Application MUST NOT import infrastructure directly
+        - Check common_imports.by_layer.{{layer}}.external_packages.forbidden
+
+    - check: donts_compliance
+      description: "Verify project don'ts are not violated"
+      validation: |
+        - Check project_donts.critical (BLOCKING)
+        - Check project_donts.high (ALERT)
+        - Check project_donts.medium (WARNING)
+
+  post_generation_checks:
+    - check: error_handling_pattern
+      description: "Validate error hierarchy usage"
+      validation: |
+        - Domain errors must be DomainError variants
+        - Infrastructure errors must be InfrastructureError variants
+        - Application layer must wrap both with ApplicationError
+
+    - check: test_coverage_impact
+      description: "Alert about test coverage"
+      validation: |
+        - Target: 70% unit test coverage
+        - Suggest creating tests for new modules
+
+  cross_reference_validation:
+    - rule: modules_exist
+      description: "Referenced modules must exist"
+      sections: [interactions, api_contracts]
+
+    - rule: endpoints_implemented
+      description: "API endpoints must have handlers"
+      sections: [api_contracts.rest_api.endpoints]
+
+    - rule: topics_have_schemas
+      description: "Kafka topics must have documented schemas"
+      sections: [api_contracts.kafka.topics_published]
+
+  output_format:
+    on_violation:
+      template: |
+        ⚠️ VIOLATION DETECTED
+        ───────────────────────────────────────
+        Rule:     {{rule_id}} - {{rule_description}}
+        Severity: {{severity}}
+        Location: {{file_path}}:{{line_number}}
+
+        Problem:
+        {{violation_description}}
+
+        Suggested fix:
+        {{suggested_fix}}
+        ───────────────────────────────────────
+
+      severity_actions:
+        critical: "STOP generation immediately"
+        high: "Alert user, suggest correction"
+        medium: "Record as warning, continue"
+
+# ============================================================
+# METADATA
+# ============================================================
+_metadata:
+  last_updated: "2025-12-03T00:00:00Z"
+  template_version: v4.2
+  updated_layers: [all]
+  generation_stats:
+    total_files_scanned: 85
+    total_lines_of_code: ~8500
+    generation_time_seconds: 180
+
+  schema_completeness:
+    total_sections: 20
+    mandatory_sections: [api_contracts, data_model, security, testing_strategy, error_handling, project_donts, common_imports, consistency_validation]
+    optional_sections: [business_flows, deployment, health_metrics, architectural_decisions, responsibility_matrix, evolution, design_patterns, historical_context, development_ecosystem]
+    implemented_sections: [api_contracts, data_model, security, testing_strategy, error_handling, design_patterns, common_imports, project_donts, consistency_validation]
+    pending_sections: [business_flows, deployment, health_metrics, architectural_decisions, responsibility_matrix, evolution, historical_context, development_ecosystem]
+
+_integrity:
+  last_updated: "2025-12-03T00:00:00Z"
+  template_version: "v4.2"
+  layers: [application, domain, infrastructure, presentation, shared, infrastructure.messaging.kafka]
+  total_modules: 22
+  mode: append
+

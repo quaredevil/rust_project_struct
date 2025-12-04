@@ -1381,13 +1381,50 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chro
 
 ### Tópicos Kafka Padrão
 
-**Nomenclatura**: `{domain}_{action}` ou `{entity_name}`
+O ecossistema utiliza os seguintes tópicos Kafka para comunicação entre os 6 microserviços:
+
+#### Tópicos de Dados de Mercado (crypto-listener)
+| Tópico | Produtor | Consumidores |
+|--------|----------|--------------|
+| `crypto-listener.prices` | crypto-listener | crypto-signals, crypto-management |
+| `crypto-listener.subscribe` | crypto-management | crypto-listener |
+| `crypto-listener.unsubscribe` | crypto-management | crypto-listener |
+
+#### Tópicos de Sinais (crypto-signals, crypto-webhook)
+| Tópico | Produtores | Consumidores |
+|--------|------------|--------------|
+| `signals.buy` | crypto-signals, crypto-webhook | crypto-trader, crypto-management |
+| `signals.sell` | crypto-signals, crypto-webhook | crypto-trader, crypto-management |
+
+#### Tópicos de Ordens (crypto-trader)
+| Tópico | Produtor | Consumidores |
+|--------|----------|--------------|
+| `orders.events` | crypto-trader | crypto-management, crypto-notifications |
+
+#### Tópicos de Management (crypto-management)
+| Tópico | Produtor | Consumidores |
+|--------|----------|--------------|
+| `management.positions.opened` | crypto-management | crypto-notifications |
+| `management.positions.closed` | crypto-management | crypto-notifications |
+| `management.positions.updated` | crypto-management | crypto-notifications |
+| `management.control.orders` | crypto-management | crypto-trader |
+| `management.strategies.control` | crypto-management | crypto-signals |
+
+#### Tópicos de Notificações (crypto-notifications)
+| Tópico | Produtores | Consumidor |
+|--------|------------|------------|
+| `notifications.send` | Todos os projetos | crypto-notifications |
+| `notifications.delivered` | crypto-notifications | (monitoring) |
+| `notifications.failed` | crypto-notifications | (monitoring/retry) |
+
+**Nomenclatura**: `{domain}.{action}` ou `{entity_name}`
 
 Exemplos:
-- `crypto_notification` (entrada)
-- `crypto_notification_delivered` (saída)
-- `crypto_trade_executed` (evento)
-- `crypto_signal_generated` (evento)
+- `crypto-listener.prices` (dados de mercado)
+- `signals.buy` (sinal de compra)
+- `orders.events` (eventos de ordens)
+- `management.positions.opened` (posição aberta)
+- `notifications.send` (pedido de notificação)
 
 ### Schema Registry
 
@@ -1395,8 +1432,17 @@ Todos os tópicos devem ter schemas Avro registrados em `/schemas/`:
 
 ```
 schemas/
+├── crypto_listener_price_update.avsc
+├── crypto_listener_subscribe_command.avsc
+├── crypto_listener_unsubscribe_command.avsc
+├── crypto_trading_signal_buy.avsc
+├── crypto_trading_signal_sell.avsc
+├── crypto_trading_order_event.avsc
+├── crypto_trading_risk_control.avsc
 ├── crypto_notification.avsc
 ├── crypto_notification_delivered.avsc
+├── crypto_notification_failed.avsc
+├── crypto_notification_throttled.avsc
 └── README.md
 ```
 
@@ -1410,14 +1456,17 @@ Cada serviço deve expor:
 
 ## 📖 Referências
 
-- **Projeto Base**: crypto-notifications
-- **Arquitetura**: Hexagonal (Ports & Adapters)
+- **Ecossistema**: 6 microserviços (crypto-listener, crypto-webhook, crypto-signals, crypto-trader, crypto-management, crypto-notifications)
+- **Arquitetura**: Hexagonal (Ports & Adapters) + Event-Driven
+- **Comunicação**: APENAS via Kafka (nunca HTTP entre serviços)
 - **Padrão de Comunicação**: Event-Driven via Kafka
 - **Runtime**: Tokio async
 - **Logging**: tracing + tracing-subscriber
+- **Documentação de Fronteiras**: BOUNDARIES_{projeto}.md
+- **Guia de Responsabilidades**: WHICH_PROJECT_DOES_WHAT.md
 
 ---
 
-**Última atualização**: 2025-10-17  
-**Versão do documento**: 1.0.0  
-**Baseado em**: crypto-notifications v1.0.0
+**Última atualização**: 2025-01-20  
+**Versão do documento**: 1.1.0  
+**Baseado em**: Ecossistema Crypto Trading (6 projetos)
