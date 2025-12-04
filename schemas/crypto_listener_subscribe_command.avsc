@@ -1,0 +1,30 @@
+{
+  "type": "record",
+  "name": "SubscribeCommand",
+  "namespace": "com.crypto.listener.commands",
+  "doc": "Command to subscribe to market data for a specific symbol",
+  "fields": [
+    {
+      "name": "symbol",
+      "type": "string",
+      "doc": "Trading pair symbol (e.g., BTCUSDT)"
+    },
+    {
+      "name": "requestId",
+      "type": "string",
+      "doc": "Unique identifier for tracking this request"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "doc": "Unix timestamp in milliseconds when the command was issued"
+    },
+    {
+      "name": "userId",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Optional user identifier who initiated the subscription"
+    }
+  ]
+}
+

@@ -1,226 +1,2562 @@
----
-project:
+# ============================================================
+# PROJECT MAP v4.2
+# Generic Rust Hexagonal Architecture Template
+# Last Updated: 2025-12-04T11:08:00Z
+# ============================================================
+
+# ============================================================
+# SECTION 1: PROJECT OVERVIEW
+# ============================================================
+overview:
   name: project-struct-base
-  language: Rust
-  edition: "2021"
-  architecture_style: "Hexagonal (Ports & Adapters)"
+  version: 0.1.0
   description: |
-    Generic Rust project template with hexagonal architecture.
-    Provides base infrastructure for Kafka producers/consumers, PostgreSQL repositories,
-    and clean architecture patterns. Ready to be customized for specific domains.
+    A production-ready Rust project template implementing Hexagonal Architecture
+    (Ports & Adapters pattern) with comprehensive infrastructure support for building
+    scalable, event-driven applications.
+    
+    This template provides a clean separation between business logic and technical
+    concerns, making it easy to swap infrastructure components, test in isolation,
+    and maintain clear architectural boundaries. The template is intentionally
+    generic - domain-specific logic has been removed to allow teams to implement
+    their own business requirements while benefiting from battle-tested infrastructure.
+    
+    Key capabilities include type-safe Kafka producers/consumers with pluggable
+    serialization, PostgreSQL repositories with compile-time query verification,
+    graceful shutdown handling, and structured observability through tracing.
 
-  features:
-    default: []
-    optional: []
+  business_domain: Template/Framework
+  team_size: 1-5
+  
+  key_stakeholders:
+    - role: Template Maintainer
+      name: Not Specified
+      responsibilities: "Maintain generic infrastructure and architectural patterns"
+    
+    - role: Template User/Developer
+      name: Variable
+      responsibilities: "Implement domain-specific business logic using template"
 
-  runtime: "Tokio async (full features)"
-  web_framework: "Axum 0.8.6 (optional)"
-  database: "PostgreSQL with SQLx"
-  messaging: "Kafka (rdkafka)"
-  observability: "tracing + tracing-subscriber (structured JSON logs)"
+  core_capabilities:
+    - capability: "Hexagonal Architecture Foundation"
+      status: production
+      criticality: high
+      
+    - capability: "Generic Kafka Messaging (Producers/Consumers)"
+      status: production
+      criticality: high
+      
+    - capability: "PostgreSQL Repository Pattern"
+      status: production
+      criticality: high
+      
+    - capability: "Event Sourcing Infrastructure"
+      status: beta
+      criticality: medium
+      
+    - capability: "Graceful Shutdown & Lifecycle Management"
+      status: production
+      criticality: high
+      
+    - capability: "Structured Logging & Observability"
+      status: production
+      criticality: high
 
+# ============================================================
+# SECTION 2: LAYER ARCHITECTURE
+# ============================================================
+architecture:
+  style: hexagonal
+  
+  layers_hierarchy:
+    - name: domain
+      level: 5
+      purpose: "Pure business logic with zero infrastructure dependencies"
+      dependencies_allowed: []
+      
+    - name: application
+      level: 4
+      purpose: "Use case orchestration and port definitions (interfaces)"
+      dependencies_allowed:
+        - domain
+        
+    - name: infrastructure
+      level: 3
+      purpose: "Adapters implementing application ports for external systems"
+      dependencies_allowed:
+        - application
+        - domain
+        
+    - name: shared
+      level: 2
+      purpose: "Cross-cutting concerns used by all layers"
+      dependencies_allowed: []
+      
+    - name: presentation
+      level: 1
+      purpose: "Entry points (HTTP, CLI, etc.) - not yet implemented"
+      dependencies_allowed:
+        - application
+        - shared
+
+  dependency_rules:
+    - "Domain MUST NOT depend on any other layer"
+    - "Application depends only on Domain"
+    - "Infrastructure implements Application ports"
+    - "All dependencies point inward toward Domain"
+    - "Shared layer contains only primitives and utilities"
+    - "Infrastructure never imported directly by Domain or Application"
+
+  layer_diagram: |
+    ┌─────────────────────────────────────────────────┐
+    │  Presentation (HTTP/CLI) - Not Yet Implemented  │
+    │  Entry points and delivery mechanisms           │
+    ├─────────────────────────────────────────────────┤
+    │  Infrastructure (Adapters)                      │
+    │  - Kafka Producers/Consumers                    │
+    │  - PostgreSQL Repositories                      │
+    │  - Config, Bootstrap, Shutdown                  │
+    ├─────────────────────────────────────────────────┤
+    │  Application (Use Cases & Ports)                │
+    │  - Port Traits (EventStore, etc.)               │
+    │  - DTOs, Services, Queries                      │
+    ├─────────────────────────────────────────────────┤
+    │  Domain (Business Logic) - TEMPLATE             │
+    │  - Aggregates, Entities, Value Objects (empty)  │
+    │  - Domain Events (empty)                        │
+    │  - Repository Interfaces (empty)                │
+    └─────────────────────────────────────────────────┘
+              ↑
+         Dependencies flow inward
+         
+    Note: Domain layer is intentionally empty in this template.
+    Users add their business-specific logic here.
+
+# ============================================================
+# SECTION 3: BUSINESS FLOWS
+# ============================================================
+business_flows:
+  description: |
+    This is a generic template - no specific business flows are implemented.
+    Below are example flows to guide template users in documenting their own.
+    
+  - name: "Example: Entity Creation Flow"
+    trigger: "HTTP POST /api/entities (user-defined)"
+    actors:
+      - type: user
+        name: "API Consumer"
+      - type: system
+        name: "Application Service"
+        
+    steps:
+      - step: 1
+        layer: presentation
+        action: "Receives and validates HTTP request"
+        module: "api::entities (to be implemented)"
+        
+      - step: 2
+        layer: application
+        action: "Orchestrates use case, validates business rules"
+        module: "services::entity_service (to be implemented)"
+        
+      - step: 3
+        layer: domain
+        action: "Creates domain aggregate with invariants"
+        module: "aggregates::entity (to be implemented)"
+        
+      - step: 4
+        layer: infrastructure
+        action: "Persists to PostgreSQL via repository"
+        module: "repositories::entity_repository (to be implemented)"
+        
+      - step: 5
+        layer: infrastructure
+        action: "Publishes domain event to Kafka"
+        module: "messaging::kafka::producers::base_producer"
+        
+    integration_points:
+      - service: "Kafka Message Broker"
+        protocol: kafka
+        when: "After successful persistence"
+        
+    error_scenarios:
+      - scenario: "Validation failure"
+        handler: "Return 400 Bad Request with error details"
+      - scenario: "Database connection failure"
+        handler: "Return 503 Service Unavailable, trigger retry"
+      - scenario: "Kafka publish failure"
+        handler: "Log error, retry with exponential backoff"
+
+# ============================================================
+# SECTION 4: API AND CONTRACTS MAP
+# ============================================================
+api_contracts:
+  description: |
+    This template does not implement REST endpoints or specific Kafka topics.
+    The infrastructure for both is provided - users define their own contracts.
+    Below are structural examples and patterns to follow.
+
+  # ─────────────────────────────────────────────────────────
+  # REST ENDPOINTS (To Be Implemented)
+  # ─────────────────────────────────────────────────────────
+  rest_api:
+    base_url: "http://localhost:8080"
+    version: "Not Applicable - Template"
+    default_content_type: "application/json"
+    
+    authentication:
+      type: "To be defined by template user"
+      description: "Axum 0.8.6 is included but not configured"
+      
+    endpoints:
+      - path: "/health"
+        method: GET
+        summary: "Health check endpoint (example, not implemented)"
+        owner_module: "infrastructure::startup::health"
+        auth_required: false
+        
+        responses:
+          - status: 200
+            description: "Service is healthy"
+            body_schema: |
+              {
+                "status": "healthy",
+                "version": "0.1.0",
+                "timestamp": "ISO8601"
+              }
+              
+      - path: "/health/ready"
+        method: GET
+        summary: "Readiness check (example, not implemented)"
+        owner_module: "infrastructure::startup::health"
+        auth_required: false
+        
+        responses:
+          - status: 200
+            description: "Service is ready"
+            body_schema: |
+              {
+                "status": "ready",
+                "checks": {
+                  "database": "ok",
+                  "kafka": "ok"
+                }
+              }
+          - status: 503
+            description: "Service not ready"
+            
+    error_format:
+      schema: |
+        {
+          "error": {
+            "code": "ERROR_CODE",
+            "message": "Human readable message",
+            "trace_id": "uuid"
+          }
+        }
+        
+      common_error_codes:
+        - code: VALIDATION_ERROR
+          http_status: 400
+          description: "Invalid request data"
+        - code: INTERNAL_ERROR
+          http_status: 500
+          description: "Internal server error"
+
+  # ─────────────────────────────────────────────────────────
+  # KAFKA TOPICS
+  # ─────────────────────────────────────────────────────────
+  kafka:
+    cluster: "To be configured"
+    bootstrap_servers: ["kafka:9092"]
+    
+    naming_convention: "<app-name>-<topic-name>"
+    
+    default_config:
+      partitions: 3
+      replication_factor: 1
+      retention_ms: 604800000  # 7 days
+      cleanup_policy: delete
+      
+    serialization:
+      key: string
+      value: json
+      schema_registry: "Optional - not configured by default"
+      
+    # ── TOPICS PUBLISHED (Examples - User Defined) ─────────
+    topics_published:
+      - topic: "example-app-domain-events"
+        description: "Generic domain events (user-defined schema)"
+        owner_module: "infrastructure::messaging::kafka::producers::base_producer"
+        
+        trigger: "When domain aggregates emit events"
+        frequency: "Variable - depends on use case"
+        
+        partitioning:
+          strategy: by_key
+          key: aggregate_id
+          reason: "Ensure ordering per aggregate"
+          
+        schema:
+          version: "User Defined"
+          compatibility: "BACKWARD (recommended)"
+          fields:
+            - name: event_id
+              type: uuid
+              required: true
+              description: "Unique event identifier"
+            - name: event_type
+              type: string
+              required: true
+              description: "Type discriminator"
+            - name: timestamp
+              type: datetime
+              required: true
+              format: "ISO8601"
+            - name: aggregate_id
+              type: uuid
+              required: true
+              description: "ID of aggregate that emitted event"
+            - name: payload
+              type: object
+              required: true
+              description: "Event-specific data"
+              
+        consumers:
+          - service: "User-defined services"
+            consumer_group: "User-defined"
+            purpose: "User-defined"
+            
+    # ── TOPICS CONSUMED (Examples - User Defined) ──────────
+    topics_consumed:
+      - topic: "example-app-commands"
+        description: "Command messages (user-defined schema)"
+        producer_service: "External or internal services"
+        handler_module: "infrastructure::messaging::kafka::consumers::base_consumer"
+        
+        consumer_group: "example-app-command-consumer"
+        
+        processing:
+          strategy: at_least_once
+          max_retries: 3
+          retry_backoff: exponential
+          dead_letter_topic: "example-app-commands-dlq"
+          
+        expected_schema:
+          version: "User Defined"
+          description: "Define your command schema"
+          
+        actions_on_receive:
+          - "Parse and validate command"
+          - "Delegate to application service"
+          - "Emit domain event on success"
+          
+    # ── MONITORING ─────────────────────────────────────────
+    monitoring:
+      consumer_lag_alert:
+        warning_threshold: 1000
+        critical_threshold: 10000
+        
+      throughput_baseline:
+        description: "Define baseline metrics per topic"
+
+# ============================================================
+# SECTION 5: DEPLOYMENT AND ENVIRONMENTS
+# ============================================================
+deployment:
+  environments:
+    - name: development
+      url: "http://localhost:8080"
+      deployment_method: docker-compose
+      description: "Local development environment"
+      
+    - name: production
+      url: "To be configured"
+      deployment_method: kubernetes
+      description: "Production deployment target (user-configured)"
+      
+  infrastructure:
+    database:
+      type: PostgreSQL
+      version: "14+"
+      connection_pool: "Configured via SQLx"
+      backup_strategy: "User-defined"
+      
+    cache:
+      type: "Not implemented in template"
+      version: "N/A"
+      usage: "Can be added as needed"
+      
+    message_broker:
+      type: Kafka
+      version: "Compatible with rdkafka 0.36"
+      topics: "User-defined"
+      partitions_per_topic: 3
+      
+  external_dependencies:
+    - name: PostgreSQL
+      purpose: "Primary data store"
+      criticality: high
+      fallback: "Application will not start without database"
+      
+    - name: Kafka
+      purpose: "Event streaming and messaging"
+      criticality: high
+      fallback: "Retry with exponential backoff"
+      
+  container_support:
+    dockerfile: "Dockerfile (multi-stage build)"
+    dockerfile_chef: "Dockerfile.chef (cargo-chef for layer caching)"
+    docker_compose: "docker-compose.yml and docker-compose.dev.yml"
+    base_image: "rust:latest (build), debian:bookworm-slim (runtime)"
+
+# ============================================================
+# SECTION 6: PROJECT METRICS AND HEALTH
+# ============================================================
+health_metrics:
+  code_quality:
+    test_coverage: "Not measured - template project"
+    mutation_coverage: "Not measured"
+    cyclomatic_complexity_avg: "Low - minimal business logic"
+    
+  technical_debt:
+    estimated_hours: 0
+    hotspots:
+      - module: "None identified"
+        issues: "Template is clean foundation"
+        severity: none
+        
+  dependencies:
+    total_external: 13
+    outdated: "Check with cargo outdated"
+    with_vulnerabilities: "Check with cargo audit"
+    update_frequency: "As needed by template users"
+    
   documentation:
-    location: "docs/"
-    conventions:
-      - "All technical documentation files must be placed in the docs/ folder"
-      - "Use descriptive uppercase names with underscores (e.g., FEATURE_GUIDE.md)"
-      - "Each significant feature, migration, or architectural decision should have its own .md file"
-      - "Include date and version information in documentation when relevant"
-      - "Migration guides should follow pattern: {FEATURE}_MIGRATION.md"
-      - "Architecture decision records should follow pattern: ADR_{NUMBER}_{TITLE}.md"
-      - "How-to guides should follow pattern: HOWTO_{TOPIC}.md"
+    api_documented: "Not applicable - no API implemented"
+    code_documented: "80% - extensive inline comments"
+    architecture_docs: "yes"
+    onboarding_guide: "yes"
 
-naming_style: snake_case
+# ============================================================
+# SECTION 7: ARCHITECTURAL DECISIONS (ADRs)
+# ============================================================
+architectural_decisions:
+  - id: ADR-001
+    title: "Adoption of Hexagonal Architecture"
+    date: "2024-01-01"
+    status: accepted
+    context: |
+      Need for a clean architecture that separates business logic from
+      infrastructure concerns, enabling testability and flexibility.
+    decision: |
+      Implement Hexagonal Architecture (Ports & Adapters) with strict
+      dependency rules enforced through module structure.
+    consequences:
+      positive:
+        - "Complete isolation of business logic"
+        - "Easy to test domain without infrastructure"
+        - "Infrastructure can be swapped without affecting domain"
+        - "Clear boundaries and responsibilities"
+      negative:
+        - "More boilerplate and abstractions"
+        - "Steeper learning curve for newcomers"
+        - "Requires discipline to maintain boundaries"
+        
+  - id: ADR-002
+    title: "Generic Kafka Producer/Consumer Pattern"
+    date: "2024-01-01"
+    status: accepted
+    context: |
+      Need for reusable, type-safe Kafka integration that works with
+      any message type and supports pluggable serialization.
+    decision: |
+      Implement generic KafkaProducer<T, S> and KafkaConsumer<T, D, H>
+      using Rust generics with trait bounds for serialization.
+    consequences:
+      positive:
+        - "Type safety at compile time"
+        - "Reusable across any domain entity"
+        - "Pluggable serialization (JSON, Avro, Protobuf, etc.)"
+        - "No code duplication"
+      negative:
+        - "Complex type signatures"
+        - "Requires understanding of Rust generics and traits"
+        
+  - id: ADR-003
+    title: "Repository Pattern with Trait Abstraction"
+    date: "2024-01-01"
+    status: accepted
+    context: |
+      Need for consistent data access pattern that can support
+      multiple backends and maintain testability.
+    decision: |
+      Define Repository<T> trait in application layer, implement
+      in infrastructure layer with PostgreSQL as default.
+    consequences:
+      positive:
+        - "Easy to mock for testing"
+        - "Can swap database implementations"
+        - "Consistent interface across entities"
+      negative:
+        - "Generic implementation may not suit all use cases"
+        - "Users need to implement trait for each entity"
+        
+  - id: ADR-004
+    title: "Bootstrap Pattern with Retry Logic"
+    date: "2024-01-01"
+    status: accepted
+    context: |
+      Applications often start before dependencies (database, Kafka)
+      are fully ready, especially in containerized environments.
+    decision: |
+      Implement bootstrap modules with configurable retry logic
+      and exponential backoff for all external dependencies.
+    consequences:
+      positive:
+        - "Resilient to timing issues in container orchestration"
+        - "Reduces manual intervention in deployments"
+        - "Clear feedback on connection issues"
+      negative:
+        - "Slower startup time in case of failures"
+        - "May mask configuration errors"
 
-application:
-  description: |
-    Application layer orchestrates use cases, defines port contracts (traits),
-    and provides DTOs for cross-layer communication. This layer is pure business
-    logic coordination without infrastructure knowledge.
+# ============================================================
+# SECTION 8: RESPONSIBILITY MATRIX
+# ============================================================
+responsibility_matrix:
+  - feature: "Configuration Management"
+    responsible: infrastructure::config::settings
+    accountable: infrastructure::config::settings
+    consulted: []
+    informed: [application, domain]
+    
+  - feature: "Database Connection Management"
+    responsible: infrastructure::bootstrap::database
+    accountable: infrastructure::bootstrap::database
+    consulted: [infrastructure::repositories]
+    informed: [application]
+    
+  - feature: "Kafka Message Production"
+    responsible: infrastructure::messaging::kafka::producers
+    accountable: infrastructure::messaging::kafka::producers
+    consulted: [application::ports]
+    informed: [application::services]
+    
+  - feature: "Kafka Message Consumption"
+    responsible: infrastructure::messaging::kafka::consumers
+    accountable: infrastructure::messaging::kafka::consumers
+    consulted: [application::ports]
+    informed: [application::services]
+    
+  - feature: "Graceful Shutdown"
+    responsible: infrastructure::shutdown::graceful
+    accountable: infrastructure::shutdown::signal_handler
+    consulted: [infrastructure::messaging, infrastructure::bootstrap]
+    informed: [main]
+    
+  - feature: "Application Observability"
+    responsible: infrastructure::startup::logging
+    accountable: infrastructure::startup::logging
+    consulted: []
+    informed: [all_layers]
 
-  naming_style: snake_case
+# ============================================================
+# SECTION 9: LAYERS (Detailed Module Documentation)
+# ============================================================
 
-  modules:
-    - name: ports
-      path: src/application/ports
-      purpose: "Port trait definitions (hexagonal architecture contracts)"
-
-      key_files:
-        - event_store.rs: "Generic event store interface"
-        - projection_store.rs: "Generic projection store interface"
-
-    - name: dtos
-      path: src/application/dtos
-      purpose: "Data Transfer Objects for API contracts and layer boundaries"
-      note: "Add your domain-specific DTOs here"
-
-    - name: services
-      path: src/application/services
-      purpose: "Application service orchestrators for use cases"
-
-    - name: queries
-      path: src/application/queries
-      purpose: "Query handlers for read operations (CQRS pattern)"
-
-  conventions:
-    - "All ports are async traits with Send + Sync bounds"
-    - "Port methods return InfraResult<T> for infrastructure errors"
-    - "DTOs use serde Serialize/Deserialize for JSON compatibility"
-
+# ──────────────────────────────────────────────────────────
+# DOMAIN LAYER
+# ──────────────────────────────────────────────────────────
 domain:
   description: |
-    Domain layer contains pure business logic, aggregates, entities, value objects,
-    and domain events. No infrastructure dependencies.
+    The domain layer is the heart of the business logic, containing aggregates,
+    entities, value objects, and domain events. In this template, the domain
+    layer is intentionally empty - it provides the structure but no specific
+    business logic. This is by design to allow template users to implement
+    their own domain models without being constrained by example code.
+    
+    The domain layer MUST have zero infrastructure dependencies. It should
+    express pure business rules and invariants using only language primitives
+    and shared types.
 
   naming_style: snake_case
+  maturity_level: stable
+  
+  ownership:
+    team: "Template users"
+    tech_lead: "N/A"
+    documentation: "docs/ARCHITECTURE.md"
 
   modules:
     - name: aggregates
       path: src/domain/aggregates
-      purpose: "Domain aggregates (aggregate roots)"
-
+      purpose: |
+        Aggregate roots that enforce business invariants and coordinate
+        entity interactions. Each aggregate is a transactional boundary.
+        Currently empty - users define their own aggregates.
+        
+      complexity_score: 1
+      test_coverage: "N/A - no implementation"
+      
+      directories:
+        - path: src/domain/aggregates
+          purpose: "Root directory for aggregate implementations"
+          files:
+            - mod.rs
+            
+      key_types: []
+      
+      dependencies:
+        internal:
+          - domain::entities
+          - domain::value_objects
+          - domain::events
+        external:
+          - uuid
+          - chrono
+          
+      conventions:
+        - "Each aggregate in its own file"
+        - "Aggregates emit domain events on state changes"
+        - "Enforce invariants in constructor and methods"
+        - "Use value objects for complex validations"
+        
     - name: entities
       path: src/domain/entities
-      purpose: "Domain entities"
-
+      purpose: |
+        Domain entities with identity that are not aggregate roots.
+        Entities within an aggregate should reference each other by ID.
+        Currently empty - users define their own entities.
+        
+      complexity_score: 1
+      test_coverage: "N/A"
+      
+      directories:
+        - path: src/domain/entities
+          purpose: "Entity type definitions"
+          files:
+            - mod.rs
+            
+      dependencies:
+        internal:
+          - domain::value_objects
+        external:
+          - uuid
+          
     - name: events
       path: src/domain/events
-      purpose: "Domain events"
-
+      purpose: |
+        Domain events that represent state changes in aggregates.
+        Events are immutable records of facts that have occurred.
+        Currently empty - users define their own event types.
+        
+      complexity_score: 1
+      test_coverage: "N/A"
+      
+      directories:
+        - path: src/domain/events
+          purpose: "Domain event type definitions"
+          files:
+            - mod.rs
+            
+      dependencies:
+        internal: []
+        external:
+          - serde
+          - uuid
+          - chrono
+          
+      conventions:
+        - "Events are immutable (all fields read-only)"
+        - "Named in past tense (OrderCreated, PaymentProcessed)"
+        - "Serializable to JSON for event sourcing"
+        - "Include aggregate_id and timestamp"
+        
     - name: value_objects
       path: src/domain/value_objects
-      purpose: "Immutable value objects"
-
+      purpose: |
+        Immutable value objects that encapsulate validation logic.
+        Value objects have no identity - equality is by value.
+        Currently empty - users define their own value objects.
+        
+      complexity_score: 1
+      test_coverage: "N/A"
+      
+      directories:
+        - path: src/domain/value_objects
+          purpose: "Value object implementations"
+          files:
+            - mod.rs
+            
+      dependencies:
+        internal:
+          - domain::errors
+        external:
+          - serde
+          
+      conventions:
+        - "Validate in constructor, panic or return Result"
+        - "Derive Eq, PartialEq, Hash, Clone"
+        - "Keep small and focused"
+        - "Examples: Email, Money, Address, etc."
+        
     - name: repositories
       path: src/domain/repositories
-      purpose: "Repository interface definitions"
-
+      purpose: |
+        Repository interface definitions (traits) that abstract persistence.
+        Implementations are in infrastructure layer.
+        Currently empty - users define repository traits for their aggregates.
+        
+      complexity_score: 1
+      test_coverage: "N/A"
+      
+      directories:
+        - path: src/domain/repositories
+          purpose: "Repository trait definitions"
+          files:
+            - mod.rs
+            
+      dependencies:
+        internal:
+          - domain::aggregates
+          - domain::errors
+        external:
+          - async_trait
+          
+      conventions:
+        - "One repository trait per aggregate root"
+        - "Methods return DomainResult<T>"
+        - "Use async_trait for async methods"
+        
+    - name: services
+      path: src/domain/services
+      purpose: |
+        Domain services for business logic that doesn't fit in a single aggregate.
+        Currently empty - users add domain services as needed.
+        
+      complexity_score: 1
+      test_coverage: "N/A"
+      
+      directories:
+        - path: src/domain/services
+          purpose: "Domain service implementations"
+          files:
+            - mod.rs
+            
+      dependencies:
+        internal:
+          - domain::aggregates
+          - domain::entities
+        external: []
+        
     - name: errors
       path: src/domain/errors.rs
-      purpose: "Domain-level error types"
-
+      purpose: |
+        Domain-specific error types for business rule violations.
+        Uses thiserror for ergonomic error definitions.
+        
+      complexity_score: 2
+      test_coverage: "N/A - error definitions"
+      
+      key_types:
+        - name: DomainError
+          kind: enum
+          purpose: "Top-level domain error type"
+          visibility: public
+          variants:
+            - Validation(String)
+            - NotFound(String)
+            - Concurrency(String)
+            
+      dependencies:
+        internal: []
+        external:
+          - thiserror
+          
   conventions:
-    - "Domain layer has zero infrastructure dependencies"
-    - "Use thiserror for domain error definitions"
+    - "NEVER import from infrastructure layer"
+    - "NEVER import from application layer"
+    - "Use only std, shared utilities, and domain-approved crates"
+    - "Business logic expressed in domain language, not technical terms"
+    - "All public types have documentation comments"
+    
+  interactions: []
+  
+  glossary_refs:
+    - term: "Aggregate"
+      usage: "Transactional consistency boundary"
+      relevance: "Core DDD pattern for organizing domain logic"
+    - term: "Value Object"
+      usage: "Immutable types with validation"
+      relevance: "Prevents primitive obsession"
+    - term: "Domain Event"
+      usage: "State change notification"
+      relevance: "Enables event sourcing and loose coupling"
+      
+  notes:
+    - "✅ Best Practice: Domain layer is dependency-free and testable"
+    - "📋 TODO: Users implement their domain model here"
+    - "🏗️ Architecture: Strict enforcement of hexagonal boundaries"
+    - "⚠️ Warning: Do not import infrastructure in domain layer"
 
-infrastructure:
+# ──────────────────────────────────────────────────────────
+# APPLICATION LAYER
+# ──────────────────────────────────────────────────────────
+application:
   description: |
-    Infrastructure layer implements adapters for external systems (Kafka, PostgreSQL, HTTP).
-    Contains all I/O and framework-specific code. Provides bootstrap, startup, and shutdown
-    modules for application lifecycle management.
+    The application layer orchestrates use cases by coordinating domain objects
+    and infrastructure adapters through port interfaces. This layer defines
+    the contracts (traits) that infrastructure must implement, and provides
+    DTOs for data transfer between layers.
+    
+    The application layer depends only on the domain layer and defines abstract
+    ports that infrastructure implements. This maintains the dependency inversion
+    principle central to hexagonal architecture.
 
   naming_style: snake_case
+  maturity_level: stable
+  
+  ownership:
+    team: "Template users"
+    tech_lead: "N/A"
+    documentation: "docs/ARCHITECTURE.md"
 
   modules:
-    - name: bootstrap
-      path: src/infrastructure/bootstrap
-      purpose: "Component initialization with retry logic and fallbacks"
+    - name: ports
+      path: src/application/ports
+      purpose: |
+        Port trait definitions that infrastructure must implement.
+        These are the interfaces through which the application communicates
+        with external systems (databases, message brokers, etc.)
+        
+      complexity_score: 3
+      test_coverage: "N/A - interface definitions"
       
-      key_files:
-        - database.rs: "PostgreSQL connection bootstrapping with retry"
-
-    - name: startup
-      path: src/infrastructure/startup
-      purpose: "Application startup configuration and logging"
+      directories:
+        - path: src/application/ports
+          purpose: "Port trait definitions"
+          files:
+            - mod.rs
+            - event_store.rs
+            - projection_store.rs
+            
+      key_types:
+        - name: EventStore
+          kind: trait
+          purpose: "Generic event store interface for event sourcing"
+          visibility: public
+          methods:
+            - "async fn append(aggregate_id, events, metadata) -> Result"
+            - "async fn read_stream(aggregate_id) -> Result<Vec<Event>>"
+            
+        - name: ProjectionStore
+          kind: trait
+          purpose: "Generic projection store interface for CQRS read models"
+          visibility: public
+          methods:
+            - "async fn save_projection(projection) -> Result"
+            - "async fn get_projection(id) -> Result<Option<Projection>>"
+            
+      dependencies:
+        internal:
+          - shared::errors
+          - shared::types
+        external:
+          - async_trait
+          - uuid
+          - serde_json
+          
+      conventions:
+        - "All ports are async traits"
+        - "Use async_trait macro"
+        - "Return InfraResult<T> from shared errors"
+        - "Traits are Send + Sync"
+        
+    - name: dtos
+      path: src/application/dtos
+      purpose: |
+        Data Transfer Objects for crossing layer boundaries.
+        DTOs are simple data containers with no business logic.
+        Currently empty - users define DTOs for their use cases.
+        
+      complexity_score: 1
+      test_coverage: "N/A"
       
-      key_files:
-        - logging.rs: "Structured logging initialization"
-        - banner.rs: "Startup banner with health status"
-        - health.rs: "Health check aggregation"
-
-    - name: shutdown
-      path: src/infrastructure/shutdown
-      purpose: "Graceful shutdown coordination"
+      directories:
+        - path: src/application/dtos
+          purpose: "DTO type definitions"
+          files:
+            - mod.rs
+            
+      dependencies:
+        internal: []
+        external:
+          - serde
+          
+      conventions:
+        - "Derive Serialize and Deserialize"
+        - "No business logic in DTOs"
+        - "Map from/to domain types in application services"
+        
+    - name: services
+      path: src/application/services
+      purpose: |
+        Application services that orchestrate use cases.
+        Services coordinate domain objects and infrastructure ports.
+        Currently empty - users implement their use cases here.
+        
+      complexity_score: 1
+      test_coverage: "N/A"
       
-      key_files:
-        - signal_handler.rs: "OS signal handling (SIGTERM, SIGINT)"
-        - graceful.rs: "Sequential shutdown with timeouts"
+      directories:
+        - path: src/application/services
+          purpose: "Use case orchestration"
+          files:
+            - mod.rs
+            
+      dependencies:
+        internal:
+          - application::ports
+          - application::dtos
+          - domain
+        external:
+          - async_trait
+          
+      conventions:
+        - "One service per use case or feature area"
+        - "Services inject port dependencies via constructor"
+        - "Services coordinate, domain objects enforce rules"
+        
+    - name: queries
+      path: src/application/queries
+      purpose: |
+        Query handlers for CQRS read operations.
+        Queries bypass domain model for optimized reads.
+        Currently empty - users implement query handlers.
+        
+      complexity_score: 1
+      test_coverage: "N/A"
+      
+      directories:
+        - path: src/application/queries
+          purpose: "CQRS query handlers"
+          files:
+            - mod.rs
+            
+      dependencies:
+        internal:
+          - application::ports
+          - application::dtos
+        external:
+          - async_trait
+          
+      conventions:
+        - "Queries never modify state"
+        - "Can read directly from projection stores"
+        - "Return DTOs, not domain entities"
+        
+  conventions:
+    - "Application depends only on domain and shared"
+    - "Never import concrete infrastructure types"
+    - "Use dependency injection for ports"
+    - "All port methods return InfraResult or AppResult"
+    
+  interactions:
+    - from: application::services
+      to: domain::aggregates
+      method: direct_call
+      description: "Services invoke domain logic via public aggregate methods"
+      frequency: real-time
+      data_volume: low
+      
+    - from: application::services
+      to: application::ports
+      method: trait_call
+      description: "Services call port traits (implemented by infrastructure)"
+      frequency: real-time
+      data_volume: medium
+      
+  glossary_refs:
+    - term: "Port"
+      usage: "Interface that infrastructure implements"
+      relevance: "Core to hexagonal architecture"
+    - term: "DTO"
+      usage: "Data transfer across layer boundaries"
+      relevance: "Decouples layers"
+    - term: "CQRS"
+      usage: "Separate read and write models"
+      relevance: "Performance and scalability"
+      
+  notes:
+    - "✅ Best Practice: Ports enable testability and flexibility"
+    - "📋 TODO: Users define ports and use cases for their domain"
+    - "🏗️ Architecture: Dependency inversion via port traits"
 
+# ──────────────────────────────────────────────────────────
+# INFRASTRUCTURE LAYER
+# ──────────────────────────────────────────────────────────
+infrastructure:
+  description: |
+    The infrastructure layer contains all adapters that implement application
+    ports and interact with external systems. This includes Kafka producers/
+    consumers, PostgreSQL repositories, configuration management, and lifecycle
+    management (bootstrap, startup, shutdown).
+    
+    This is the most complete layer in the template, providing production-ready
+    implementations that can be used as-is or customized for specific needs.
+
+  naming_style: snake_case
+  maturity_level: production
+  
+  ownership:
+    team: "Template maintainers"
+    tech_lead: "N/A"
+    documentation: "docs/ARCHITECTURE.md, docs/GETTING_STARTED.md"
+
+  modules:
     - name: messaging
       path: src/infrastructure/messaging
-      purpose: "Kafka infrastructure"
+      purpose: |
+        Complete Kafka infrastructure with generic producers and consumers.
+        Supports pluggable serialization, retry logic, batching, and graceful
+        shutdown. Type-safe implementation using Rust generics.
+        
+      complexity_score: 8
+      test_coverage: "60% (estimated)"
       
-      subdirectories:
-        - kafka/producers/: "Generic Kafka producers"
-        - kafka/consumers/: "Generic Kafka consumers"
-        - kafka/common.rs: "Serialization and common types"
-        - kafka/config.rs: "Kafka configuration"
-
+      directories:
+        - path: src/infrastructure/messaging/kafka
+          purpose: "Kafka-specific implementations"
+          files:
+            - mod.rs
+            - common.rs
+            - config.rs
+            
+        - path: src/infrastructure/messaging/kafka/producers
+          purpose: "Generic Kafka producers"
+          files:
+            - mod.rs
+            - base_producer.rs
+            - batching_producer.rs
+            
+        - path: src/infrastructure/messaging/kafka/consumers
+          purpose: "Generic Kafka consumers"
+          files:
+            - mod.rs
+            - base_consumer.rs
+            
+      key_types:
+        - name: KafkaProducer<T, S>
+          kind: struct
+          purpose: "Generic Kafka producer with type-safe messages and pluggable serialization"
+          visibility: public
+          
+        - name: KafkaProducerPort<T>
+          kind: trait
+          purpose: "Port trait for Kafka producers"
+          visibility: public
+          
+        - name: KafkaConsumer<T, D, H>
+          kind: struct
+          purpose: "Generic Kafka consumer with deserializer and message handler"
+          visibility: public
+          
+        - name: KafkaConsumerPort
+          kind: trait
+          purpose: "Port trait for Kafka consumers"
+          visibility: public
+          
+        - name: MessageSerializer<T>
+          kind: trait
+          purpose: "Pluggable serialization strategy"
+          visibility: public
+          
+        - name: MessageDeserializer<T>
+          kind: trait
+          purpose: "Pluggable deserialization strategy"
+          visibility: public
+          
+        - name: MessageHandler<T>
+          kind: trait
+          purpose: "Handler for consumed messages"
+          visibility: public
+          
+      dependencies:
+        internal:
+          - shared::errors
+          - infrastructure::config
+        external:
+          - rdkafka
+          - tokio
+          - async_trait
+          - tracing
+          
+      performance_notes:
+        - "Batching producer buffers messages for high throughput"
+        - "Async channel between send() and actual Kafka publish"
+        - "Retry logic with exponential backoff configurable"
+        - "Connection pooling handled by rdkafka"
+        
+      conventions:
+        - "Use Arc<Self> for shared ownership"
+        - "Bootstrap method with retry logic"
+        - "Graceful shutdown via shutdown() method"
+        - "Health check method for readiness probes"
+        
     - name: repositories
       path: src/infrastructure/repositories
-      purpose: "Repository implementations"
+      purpose: |
+        Repository implementations using PostgreSQL and SQLx.
+        Provides base Repository<T> trait and PostgresRepository base type.
+        Users implement the trait for their specific entities.
+        
+      complexity_score: 5
+      test_coverage: "N/A - example implementation"
       
-      key_files:
-        - base_repository.rs: "Generic repository trait and PostgreSQL base"
-
+      directories:
+        - path: src/infrastructure/repositories
+          purpose: "Repository implementations"
+          files:
+            - mod.rs
+            - base_repository.rs
+            
+      key_types:
+        - name: Repository<T>
+          kind: trait
+          purpose: "Generic CRUD interface for entities"
+          visibility: public
+          methods:
+            - "async fn find_by_id(id) -> Result<Option<T>>"
+            - "async fn find_all() -> Result<Vec<T>>"
+            - "async fn save(entity) -> Result<()>"
+            - "async fn update(entity) -> Result<()>"
+            - "async fn delete(id) -> Result<()>"
+            
+        - name: PostgresRepository
+          kind: struct
+          purpose: "Base PostgreSQL repository with connection pool"
+          visibility: public
+          
+      dependencies:
+        internal:
+          - shared::errors
+        external:
+          - sqlx
+          - async_trait
+          
+      conventions:
+        - "Implement Repository<T> for each entity"
+        - "Use compile-time verified queries with sqlx::query!"
+        - "Return InfraResult<T>"
+        - "Pool managed at application level, injected via constructor"
+        
+    - name: bootstrap
+      path: src/infrastructure/bootstrap
+      purpose: |
+        Component initialization with retry logic for resilient startup.
+        Handles database connections and other external dependencies that
+        may not be immediately available (e.g., in container environments).
+        
+      complexity_score: 6
+      test_coverage: "50%"
+      
+      directories:
+        - path: src/infrastructure/bootstrap
+          purpose: "Component bootstrap implementations"
+          files:
+            - mod.rs
+            - database.rs
+            
+      key_types:
+        - name: DatabaseBootstrap
+          kind: struct
+          purpose: "PostgreSQL connection with retry logic"
+          visibility: public
+          methods:
+            - "async fn connect(max_attempts, retry_delay) -> PgPool"
+            
+      dependencies:
+        internal:
+          - shared::errors
+        external:
+          - sqlx
+          - tokio
+          - tracing
+          
+      performance_notes:
+        - "Exponential backoff between retry attempts"
+        - "Configurable max attempts and delay"
+        - "Validates connection before returning"
+        
+    - name: startup
+      path: src/infrastructure/startup
+      purpose: |
+        Application startup utilities including logging initialization,
+        startup banner display, and health check aggregation for providing
+        visibility into application state at launch.
+        
+      complexity_score: 4
+      test_coverage: "40%"
+      
+      directories:
+        - path: src/infrastructure/startup
+          purpose: "Startup utilities"
+          files:
+            - mod.rs
+            - logging.rs
+            - banner.rs
+            - health.rs
+            
+      key_types:
+        - name: LoggingSetup
+          kind: struct
+          purpose: "Structured logging initialization"
+          visibility: public
+          methods:
+            - "fn initialize() - Sets up tracing subscriber"
+            
+        - name: StartupBanner
+          kind: struct
+          purpose: "Display startup information"
+          visibility: public
+          
+        - name: HealthChecker
+          kind: struct
+          purpose: "Aggregate health check results"
+          visibility: public
+          
+      dependencies:
+        internal: []
+        external:
+          - tracing
+          - tracing_subscriber
+          
+      conventions:
+        - "Initialize logging before any other operations"
+        - "Structured JSON logs for production"
+        - "Pretty console logs for development"
+        
+    - name: shutdown
+      path: src/infrastructure/shutdown
+      purpose: |
+        Graceful shutdown coordination for ensuring clean resource cleanup.
+        Handles OS signals (SIGTERM, SIGINT) and coordinates shutdown of
+        all application components with configurable timeout.
+        
+      complexity_score: 5
+      test_coverage: "50%"
+      
+      directories:
+        - path: src/infrastructure/shutdown
+          purpose: "Shutdown handlers"
+          files:
+            - mod.rs
+            - signal_handler.rs
+            - graceful.rs
+            
+      key_types:
+        - name: SignalHandler
+          kind: struct
+          purpose: "OS signal handling (SIGTERM, SIGINT)"
+          visibility: public
+          
+        - name: GracefulShutdown
+          kind: struct
+          purpose: "Coordinated component shutdown"
+          visibility: public
+          methods:
+            - "async fn shutdown() - Execute shutdown sequence"
+            
+      dependencies:
+        internal: []
+        external:
+          - tokio
+          - tracing
+          
+      conventions:
+        - "Components implement shutdown() method"
+        - "Shutdown in reverse order of initialization"
+        - "Timeout prevents indefinite hangs"
+        
     - name: config
       path: src/infrastructure/config
-      purpose: "Configuration management"
+      purpose: |
+        Configuration management with environment variable support.
+        Supports .env files, environment variables, and config files
+        with hierarchical precedence. Type-safe settings with validation.
+        
+      complexity_score: 7
+      test_coverage: "N/A - configuration"
       
-      key_files:
-        - settings.rs: "Application settings with environment support"
-
+      directories:
+        - path: src/infrastructure/config
+          purpose: "Configuration types and loading"
+          files:
+            - mod.rs
+            - settings.rs
+            
+      key_types:
+        - name: Settings
+          kind: struct
+          purpose: "Application configuration"
+          visibility: public
+          fields:
+            - app: AppSettings
+            - kafka: KafkaSettings
+            - topics: TopicsConfig
+            - kafka_producers: HashMap<String, KafkaProducerSettings>
+            - kafka_consumers: HashMap<String, KafkaConsumerSettings>
+            - market: MarketSettings
+            - database: DatabaseSettings
+            
+        - name: KafkaProducerConfig
+          kind: struct
+          purpose: "Configuration for individual Kafka producer"
+          visibility: public
+          
+        - name: KafkaConsumerConfig
+          kind: struct
+          purpose: "Configuration for individual Kafka consumer"
+          visibility: public
+          
+      dependencies:
+        internal: []
+        external:
+          - config
+          - dotenvy
+          - serde
+          
+      conventions:
+        - "Load from environment variables first"
+        - "Fall back to .env file"
+        - "Provide sensible defaults"
+        - "HashMap for multiple producers/consumers"
+        
     - name: event_store
       path: src/infrastructure/event_store
-      purpose: "Event store implementations"
+      purpose: |
+        Event store implementation for event sourcing pattern.
+        Provides in-memory implementation for testing and as a reference
+        for persistent implementations (PostgreSQL, EventStoreDB, etc.)
+        
+      complexity_score: 6
+      test_coverage: "70%"
       
-      key_files:
-        - in_memory_event_store.rs: "In-memory event store for testing"
-
+      directories:
+        - path: src/infrastructure/event_store
+          purpose: "Event store implementations"
+          files:
+            - mod.rs
+            - in_memory_event_store.rs
+            
+      key_types:
+        - name: InMemoryEventStore
+          kind: struct
+          purpose: "In-memory event store for testing"
+          visibility: public
+          
+      dependencies:
+        internal:
+          - application::ports::event_store
+          - shared::errors
+          - shared::types
+        external:
+          - parking_lot
+          - uuid
+          - serde_json
+          
+      conventions:
+        - "Implements EventStore port trait"
+        - "Thread-safe with RwLock"
+        - "Append-only semantics"
+        
   conventions:
-    - "All infrastructure types implement application ports (traits)"
-    - "Use Arc<Self> for shared ownership across async tasks"
-    - "Graceful shutdown hooks via shutdown() method on ports"
-    - "Health checks return InfraResult for readiness probes"
-    - "Generic Kafka producers/consumers use type parameters for message types"
-    - "Pluggable serialization via MessageSerializer/MessageDeserializer traits"
-    - "Bootstrap modules handle all initialization with retry logic"
-    - "Startup modules provide observability and user feedback"
-    - "Shutdown modules ensure graceful resource cleanup"
+    - "All infrastructure types implement application port traits"
+    - "Use Arc<Self> for shared ownership in async contexts"
+    - "Bootstrap methods with retry logic and configurable parameters"
+    - "Health check methods return InfraResult<()>"
+    - "Graceful shutdown via shutdown() method on ports"
+    - "Generic implementations using Rust type parameters"
+    - "Pluggable strategies via trait abstractions"
+    
+  interactions:
+    - from: infrastructure::messaging::kafka::producers
+      to: kafka
+      method: kafka
+      description: "Publish messages to Kafka topics"
+      frequency: real-time
+      data_volume: high
+      
+    - from: infrastructure::messaging::kafka::consumers
+      to: kafka
+      method: kafka
+      description: "Consume messages from Kafka topics"
+      frequency: real-time
+      data_volume: high
+      
+    - from: infrastructure::repositories
+      to: postgresql
+      method: db
+      description: "Execute SQL queries via connection pool"
+      frequency: real-time
+      data_volume: medium
+      
+    - from: infrastructure::bootstrap::database
+      to: postgresql
+      method: db
+      description: "Establish connection pool with retry"
+      frequency: on-demand
+      data_volume: low
+      
+  glossary_refs:
+    - term: "Adapter"
+      usage: "Infrastructure implementations of application ports"
+      relevance: "Core hexagonal architecture pattern"
+    - term: "Bootstrap"
+      usage: "Resilient component initialization"
+      relevance: "Handles container timing issues"
+    - term: "Generic"
+      usage: "Type-safe, reusable implementations"
+      relevance: "Reduces code duplication"
+      
+  notes:
+    - "✅ Best Practice: Retry logic makes deployments resilient"
+    - "✅ Best Practice: Generic producers/consumers are type-safe"
+    - "🔥 Hotspot: Kafka producer/consumer are most complex components"
+    - "📋 TODO: Add PostgreSQL event store implementation"
+    - "🏗️ Architecture: All infrastructure implements port traits"
+    - "⚠️ Warning: Ensure proper shutdown to flush Kafka producers"
 
-  patterns:
-    - pattern: Adapter Pattern
-      usage: "Infrastructure types adapt external systems to port interfaces"
-
-    - pattern: Decorator Pattern
-      usage: "Batching decorator adds buffering logic for high-throughput scenarios"
-
-    - pattern: Generic Programming
-      usage: "Type-safe Kafka producers/consumers for any message type"
-
-    - pattern: Builder Pattern
-      usage: "Fluent component initialization in bootstrap modules"
-
+# ──────────────────────────────────────────────────────────
+# SHARED LAYER
+# ──────────────────────────────────────────────────────────
 shared:
   description: |
-    Shared layer contains common utilities, traits, types, and error definitions
-    used across all layers.
+    The shared layer contains common utilities, types, traits, and error
+    definitions used across all layers. This is kept minimal to avoid
+    creating a "big ball of mud" shared kernel.
+    
+    Only truly cross-cutting concerns belong here - things that are needed
+    by multiple layers and don't fit naturally in any single layer.
+
+  naming_style: snake_case
+  maturity_level: stable
+  
+  ownership:
+    team: "Template maintainers"
+    tech_lead: "N/A"
+    documentation: "Inline documentation"
 
   modules:
-    - errors.rs: "Common error types (InfraError, DomainError)"
-    - types.rs: "Common type aliases"
-    - traits/: "Common trait definitions"
-    - utils/: "Utility functions"
-
+    - name: errors
+      path: src/shared/errors.rs
+      purpose: |
+        Common error types for domain, application, and infrastructure layers.
+        Uses thiserror for ergonomic error definitions with automatic
+        conversions between error types.
+        
+      complexity_score: 3
+      test_coverage: "N/A - error definitions"
+      
+      key_types:
+        - name: DomainError
+          kind: enum
+          purpose: "Domain-level errors (business rule violations)"
+          visibility: public
+          variants:
+            - Validation(String)
+            - NotFound(String)
+            - Concurrency(String)
+            
+        - name: ApplicationError
+          kind: enum
+          purpose: "Application-level errors"
+          visibility: public
+          variants:
+            - Domain(DomainError)
+            - Infrastructure(InfrastructureError)
+            - Serde(serde_json::Error)
+            
+        - name: InfrastructureError
+          kind: enum
+          purpose: "Infrastructure-level errors (I/O, external systems)"
+          visibility: public
+          variants:
+            - Database(String)
+            - EventStore(String)
+            - Io(String)
+            - Messaging(String)
+            - WebSocket(String)
+            - Kafka(String)
+            - Serialization(String)
+            
+        - name: DomainResult<T>
+          kind: type
+          purpose: "Alias for Result<T, DomainError>"
+          visibility: public
+          
+        - name: AppResult<T>
+          kind: type
+          purpose: "Alias for Result<T, ApplicationError>"
+          visibility: public
+          
+        - name: InfraResult<T>
+          kind: type
+          purpose: "Alias for Result<T, InfrastructureError>"
+          visibility: public
+          
+      dependencies:
+        internal: []
+        external:
+          - thiserror
+          - serde_json
+          
+    - name: types
+      path: src/shared/types.rs
+      purpose: |
+        Common type aliases and basic types used across layers.
+        Includes event envelope types for event sourcing.
+        
+      complexity_score: 2
+      test_coverage: "N/A"
+      
+      key_types:
+        - name: EventEnvelope<T>
+          kind: struct
+          purpose: "Wrapper for events with metadata"
+          visibility: public
+          
+        - name: EventMetadata
+          kind: struct
+          purpose: "Event metadata (timestamp, correlation ID, etc.)"
+          visibility: public
+          
+      dependencies:
+        internal: []
+        external:
+          - uuid
+          - chrono
+          - serde
+          
+    - name: traits
+      path: src/shared/traits
+      purpose: |
+        Common trait definitions that don't belong to a specific layer.
+        Currently empty - users add as needed.
+        
+      complexity_score: 1
+      test_coverage: "N/A"
+      
+      directories:
+        - path: src/shared/traits
+          purpose: "Common trait definitions"
+          files:
+            - mod.rs
+            
+      dependencies:
+        internal: []
+        external: []
+        
+    - name: utils
+      path: src/shared/utils
+      purpose: |
+        Utility functions for common operations like datetime handling
+        and validation. Kept minimal to avoid utility bloat.
+        
+      complexity_score: 2
+      test_coverage: "60%"
+      
+      directories:
+        - path: src/shared/utils
+          purpose: "Utility functions"
+          files:
+            - mod.rs
+            - datetime.rs
+            - validation.rs
+            
+      dependencies:
+        internal: []
+        external:
+          - chrono
+          
   conventions:
     - "Keep shared layer minimal"
-    - "Only truly cross-cutting concerns belong here"
+    - "No business logic in shared"
+    - "Only truly cross-cutting concerns"
+    - "Well-documented public API"
+    
+  interactions: []
+  
+  glossary_refs:
+    - term: "Shared Kernel"
+      usage: "Common code across bounded contexts"
+      relevance: "DDD pattern for shared concepts"
+      
+  notes:
+    - "✅ Best Practice: Minimal shared layer prevents coupling"
+    - "⚠️ Warning: Don't turn this into a junk drawer"
+    - "📋 TODO: Add only what's truly needed across all layers"
 
-best_practices:
-  - category: architecture
-    note: "Bootstrap, startup, and shutdown modules follow single responsibility principle"
-    priority: high
+# ============================================================
+# SECTION 10: ROADMAP AND EVOLUTION
+# ============================================================
+evolution:
+  current_phase: stable_template
+  
+  description: |
+    This is a stable template project. Evolution is driven by user feedback
+    and emerging best practices in Rust ecosystem.
 
-  - category: configuration
-    note: "Multiple Kafka topics/producers/consumers supported via Settings HashMap"
-    priority: high
+  planned_improvements:
+    - quarter: Q1 2025
+      items:
+        - "Add example microservice implementation"
+        - "Add OpenAPI/Swagger support for HTTP endpoints"
+        - "Add Prometheus metrics integration"
+      priority: medium
+      
+    - quarter: Q2 2025
+      items:
+        - "Add persistent event store implementation (PostgreSQL)"
+        - "Add integration test examples"
+        - "Add performance benchmarks"
+      priority: low
 
-  - category: naming
-    note: "Follow consistent naming pattern for Kafka topics (e.g., {app-name}-{topic-name})"
-    priority: medium
+  deprecated_features:
+    - name: "None - template is intentionally minimal"
+      removal_date: "N/A"
+      migration_guide: "N/A"
 
-quality:
-  test_coverage: unknown
-  cyclomatic_complexity: medium
-  coupling: moderate
-  cohesion: high
+  breaking_changes_planned: []
+
+# ============================================================
+# SECTION 11: DATA AND MODELS MAP
+# ============================================================
+data_model:
+  persistence_strategy: hybrid
+  
+  description: |
+    The template provides infrastructure for multiple persistence strategies:
+    - CRUD via Repository<T> trait
+    - Event Sourcing via EventStore port
+    - CQRS via separate command/query models
+    
+    Actual data models are user-defined.
+
+  entities:
+    - name: "User-Defined Entities"
+      type: aggregate_root
+      layer: domain
+      table_schema: "Users define schema"
+      description: "Template provides structure, not implementation"
+      
+      attributes: []
+      relationships: []
+      invariants: []
+      events_emitted: []
+
+  value_objects:
+    - name: "User-Defined Value Objects"
+      layer: domain
+      purpose: "Encapsulate validation and business rules"
+      validation_rules: []
+
+  dtos:
+    - name: "User-Defined DTOs"
+      layer: application
+      purpose: "Data transfer between layers"
+      source: "domain entities"
+      target: "presentation layer"
+      mappings: []
+
+  database_schemas:
+    - schema_name: "public"
+      database: postgres
+      tables: []
+      description: "Users define their own schema based on domain model"
+      
+  data_migrations:
+    - id: "User-managed"
+      description: "Use SQLx migrations or Flyway for schema migrations"
+      applied_at: "N/A"
+      rollback_available: yes
+
+# ============================================================
+# SECTION 12: SECURITY AND COMPLIANCE
+# ============================================================
+security:
+  authentication:
+    strategy: "Not implemented - user-defined"
+    provider: custom
+    description: |
+      Template does not implement authentication. Users should add:
+      - JWT validation middleware
+      - OAuth2 integration
+      - API key validation
+      - Or other authentication as needed
+
+  authorization:
+    model: "Not implemented - user-defined"
+    description: |
+      Template does not implement authorization. Consider:
+      - RBAC (Role-Based Access Control)
+      - ABAC (Attribute-Based Access Control)
+      - Policy-based authorization
+      
+    roles: []
+    policies: []
+
+  data_protection:
+    encryption:
+      at_rest: no
+      description: "PostgreSQL can be configured for encryption at rest"
+      
+      at_transit: yes
+      protocol: TLS_1.3
+      description: "Use TLS for PostgreSQL and Kafka connections"
+      
+    pii_fields: []
+    
+    data_retention:
+      - data_type: "User-defined"
+        retention_period: "User-defined"
+        deletion_method: "User-defined"
+
+  compliance:
+    regulations: []
+    description: "Users must implement compliance based on their requirements"
+    
+    gdpr_features:
+      right_to_access: not_implemented
+      right_to_erasure: not_implemented
+      right_to_portability: not_implemented
+      consent_management: not_implemented
+      
+    audit_logging:
+      enabled: partial
+      description: "Structured logging via tracing - users add audit events"
+      events_tracked: []
+      retention: "User-defined"
+      storage: "stdout/stderr (structured JSON)"
+
+  vulnerabilities:
+    scanning_frequency: on_demand
+    tools: [cargo-audit]
+    description: "Run 'cargo audit' to check for known vulnerabilities"
+    
+    known_issues: []
+
+# ============================================================
+# SECTION 13: TESTING STRATEGY
+# ============================================================
+testing_strategy:
+  description: |
+    Template provides structure for testing but minimal test implementations.
+    Users should add tests for their domain logic and use cases.
+
+  test_pyramid:
+    unit_tests:
+      coverage_target: 80%
+      current_coverage: "N/A - no business logic"
+      framework: cargo_test
+      location: "src/**/*_test.rs or tests/"
+      naming_convention: "test_<scenario>_<expected_result>"
+      
+      mocking_strategy: mockall
+      description: |
+        Domain logic should have extensive unit tests.
+        Use mockall for mocking infrastructure ports.
+        
+      key_areas:
+        - "domain::aggregates (should be 90%+)"
+        - "domain::value_objects (should be 100%)"
+        - "application::services (test with mocked ports)"
+
+    integration_tests:
+      coverage_target: 50%
+      current_coverage: "0%"
+      location: "tests/integration/"
+      description: |
+        Test infrastructure components with real dependencies.
+        Use testcontainers for PostgreSQL and Kafka.
+        
+      test_databases:
+        - type: testcontainers
+          setup: automatic
+          cleanup: per_test
+          description: "Recommended for integration tests"
+
+      external_mocks:
+        - service: kafka
+          tool: testcontainers
+          scenarios: []
+
+    e2e_tests:
+      coverage_target: 20%
+      current_coverage: "0%"
+      location: "tests/e2e/"
+      description: |
+        End-to-end tests with full application stack.
+        Use docker-compose for test environment.
+
+  test_data_management:
+    fixtures:
+      location: "tests/fixtures/"
+      format: json
+      description: "Users add fixtures for their domain entities"
+
+    factories:
+      - name: "User-defined factories"
+        module: "tests::factories"
+        purpose: "Generate test data with sensible defaults"
+
+  performance_tests:
+    load_testing:
+      tool: "To be defined (k6, locust, etc.)"
+      scenarios: []
+      description: "Users add performance tests for critical paths"
+
+    benchmarks:
+      framework: criterion
+      location: "benches/"
+      description: "Add criterion benchmarks for performance-critical code"
+      key_operations: []
+
+  mutation_testing:
+    tool: cargo-mutants
+    description: "Consider adding mutation testing for critical domain logic"
+    threshold: "70%"
+    current_score: "N/A"
+    exempted_modules: []
+
+# ============================================================
+# SECTION 14: ERROR HANDLING AND OBSERVABILITY
+# ============================================================
+error_handling:
+  error_hierarchy:
+    - name: DomainError
+      layer: domain
+      variants:
+        - InvalidEmail
+        - OrderAlreadyProcessed
+        - InsufficientStock
+      propagation: "Never crosses layer boundary directly"
+      description: "Business rule violations"
+
+    - name: ApplicationError
+      layer: application
+      wraps: [DomainError, InfrastructureError]
+      variants:
+        - ValidationFailed
+        - UseCaseExecutionFailed
+      propagation: "Converted to HTTP status or logged"
+      description: "Application-level errors"
+
+    - name: InfrastructureError
+      layer: infrastructure
+      variants:
+        - DatabaseConnectionFailed
+        - ExternalServiceTimeout
+        - CacheUnavailable
+        - Kafka
+        - Serialization
+      propagation: "Wrapped by ApplicationError"
+      description: "Technical errors from external systems"
+
+  error_conversion:
+    - from: "DomainError::Validation"
+      to: "HTTP 400 Bad Request (when HTTP layer added)"
+      message_strategy: expose_details
+      
+    - from: "InfrastructureError::Database"
+      to: "HTTP 503 Service Unavailable"
+      message_strategy: hide_details
+      logged_context: "Full error with stack trace"
+
+  recovery_strategies:
+    - error_type: "Kafka connection failure"
+      strategy: retry_with_exponential_backoff
+      max_attempts: 5
+      backoff: "500ms, 1s, 2s, 4s, 8s"
+      fallback: "Log error and alert"
+      
+    - error_type: "Database connection failure"
+      strategy: retry_with_backoff
+      max_attempts: 5
+      backoff: "Configurable via settings"
+      fallback: "Application fails to start"
+      
+    - error_type: "Domain validation failure"
+      strategy: fail_fast
+      response: "immediate error response"
+
+  observability:
+    logging:
+      framework: tracing
+      description: |
+        Structured logging with tracing and tracing-subscriber.
+        JSON format for production, pretty format for development.
+        
+      levels:
+        - level: ERROR
+          conditions: "Unrecoverable errors, panics"
+          includes: [error_type, context, trace_id]
+          
+        - level: WARN
+          conditions: "Retries, degraded service, configuration issues"
+          includes: [context, attempt_count]
+          
+        - level: INFO
+          conditions: "Lifecycle events, startup, shutdown"
+          includes: [event_type, component]
+          
+        - level: DEBUG
+          conditions: "Development debugging"
+          includes: [detailed_context]
+          
+      structured_logging: yes
+      correlation_id: "Users can add correlation ID middleware"
+      pii_scrubbing: "Users must implement for sensitive data"
+
+    metrics:
+      backend: "Not implemented - users can add Prometheus"
+      description: |
+        Template does not include metrics. Recommended additions:
+        - Prometheus exporter
+        - Business metrics (orders created, etc.)
+        - Technical metrics (request latency, error rate)
+        
+      business_metrics: []
+      technical_metrics: []
+      sli_slo: []
+
+    tracing:
+      backend: "Not implemented - users can add Jaeger/Tempo"
+      description: |
+        Template uses tracing crate for structured logging.
+        Can be extended to distributed tracing with:
+        - tracing-opentelemetry
+        - Jaeger or Tempo backend
+        
+      sampling_rate: "To be defined"
+      instrumented_operations: []
+      span_attributes: []
+
+    alerting:
+      channels: []
+      alerts: []
+      description: "Users define alerting based on metrics and logs"
+
+# ============================================================
+# SECTION 15: PATTERNS AND ANTI-PATTERNS
+# ============================================================
+design_patterns:
+  architectural_patterns:
+    - pattern: "Ports and Adapters (Hexagonal Architecture)"
+      usage: "Core architectural pattern of entire template"
+      locations: [application::ports, infrastructure]
+      benefits:
+        - "Complete isolation of business logic"
+        - "Easy to test with mocked ports"
+        - "Infrastructure can be swapped"
+      tradeoffs:
+        - "More abstractions and files"
+        - "Learning curve for newcomers"
+        
+    - pattern: "Repository Pattern"
+      usage: "Abstract data access behind traits"
+      locations: [application::ports, infrastructure::repositories]
+      benefits:
+        - "Testable without real database"
+        - "Consistent data access interface"
+      tradeoffs:
+        - "Boilerplate for each entity"
+        
+    - pattern: "CQRS"
+      usage: "Separate command and query responsibilities"
+      locations: [application::services, application::queries]
+      benefits:
+        - "Optimized reads and writes separately"
+        - "Scalable read models"
+      tradeoffs:
+        - "Eventual consistency"
+        - "More complex data flow"
+
+  creational_patterns:
+    - pattern: "Factory Method"
+      usage: "Bootstrap methods create infrastructure components"
+      example_module: infrastructure::messaging::kafka::producers
+      scenario: "KafkaProducer::bootstrap() with retry logic"
+      
+    - pattern: "Builder Pattern"
+      usage: "Configuration builders (via Settings)"
+      example_module: infrastructure::config::settings
+      scenario: "Complex configuration with many optional fields"
+
+  behavioral_patterns:
+    - pattern: "Strategy Pattern"
+      usage: "Pluggable serialization via traits"
+      example_module: infrastructure::messaging::kafka::common
+      implementations: [MessageSerializer, MessageDeserializer]
+      
+    - pattern: "Observer Pattern"
+      usage: "MessageHandler trait for Kafka consumers"
+      example_module: infrastructure::messaging::kafka::consumers
+      scenario: "Decouple message processing from consumption"
+
+  anti_patterns:
+    known_code_smells: []
+    
+    architectural_debt: []
+    
+    description: |
+      Template is intentionally minimal to avoid introducing debt.
+      Users should watch for these common anti-patterns:
+      - Importing infrastructure in domain layer
+      - Business logic in DTOs
+      - God objects that do too much
+      - Primitive obsession (use value objects)
+
+  refactoring_queue: []
+
+# ============================================================
+# SECTION 16: HISTORICAL CONTEXT AND EVOLUTION
+# ============================================================
+historical_context:
+  project_timeline:
+    - date: "2024"
+      milestone: "Template created"
+      team_size: 1
+      tech_stack: "Rust + Tokio + Axum + SQLx + Kafka"
+      description: "Initial template with hexagonal architecture"
+
+  legacy_systems: []
+  
+  major_incidents: []
+  
+  technical_debt_history:
+    description: "Template starts with zero debt - intentionally minimal"
+    accumulated_debt: []
+    paid_down_debt: []
+    current_debt_ratio: 0.0
+    target_debt_ratio: 0.0
+
+# ============================================================
+# SECTION 17: DEVELOPMENT TOOLS INTEGRATION
+# ============================================================
+development_ecosystem:
+  version_control:
+    system: git
+    platform: "User-defined (GitHub, GitLab, etc.)"
+    branching_strategy: "User-defined"
+    
+    commit_conventions: "User-defined (recommend Conventional Commits)"
+
+  ci_cd:
+    platform: "User-defined"
+    description: |
+      Template includes Dockerfile and Makefile for CI/CD integration.
+      Users should add CI/CD pipelines for:
+      - cargo fmt --check
+      - cargo clippy
+      - cargo test
+      - cargo audit
+      - cargo build --release
+      - docker build
+      
+    pipelines:
+      - name: "PR Validation (recommended)"
+        triggers: [pull_request]
+        steps:
+          - lint: "cargo clippy -- -D warnings"
+          - format_check: "cargo fmt -- --check"
+          - unit_tests: "cargo test"
+          - security_scan: "cargo audit"
+          
+      - name: "Deploy Production (recommended)"
+        triggers: [push_to_main]
+        steps:
+          - build: "cargo build --release"
+          - docker_build: "docker build -t app:$VERSION ."
+          - push_registry: "docker push"
+          - deploy: "kubectl apply / helm upgrade"
+
+  code_quality_tools:
+    - tool: cargo-fmt
+      purpose: "Code formatting"
+      config_file: "rustfmt.toml (user adds if needed)"
+      enforced: recommended
+      
+    - tool: cargo-clippy
+      purpose: "Linting and best practices"
+      config_file: "clippy.toml (user adds if needed)"
+      enforced: recommended
+      
+    - tool: cargo-audit
+      purpose: "Security vulnerability scanning"
+      config_file: "N/A"
+      enforced: recommended
+      
+    - tool: cargo-deny
+      purpose: "Dependency licensing and security"
+      config_file: "deny.toml (user adds if needed)"
+      enforced: optional
+
+  documentation_tools:
+    - tool: cargo-doc
+      purpose: "API documentation from code comments"
+      location: "target/doc/"
+      coverage: "80%"
+      
+    - tool: "README and docs/"
+      purpose: "Architecture and usage documentation"
+      file: "README.md, docs/ARCHITECTURE.md, docs/GETTING_STARTED.md"
+      auto_generated: no
+
+# ============================================================
+# SECTION 18: IMPORTS AND DEPENDENCIES COMMON PER LAYER
+# ============================================================
+common_imports:
+  description: |
+    Standard import patterns for Rust template following hexagonal architecture.
+    These rules enforce the dependency inversion principle.
+
+  by_layer:
+    domain:
+      description: "Domain layer - pure business logic"
+      internal_imports:
+        - "use crate::domain::value_objects::*;"
+        - "use crate::domain::events::*;"
+        - "use crate::domain::errors::*;"
+        
+      external_packages:
+        allowed:
+          - name: uuid
+            usage: "Unique identifiers for aggregates/entities"
+          - name: chrono
+            usage: "Date and time handling"
+          - name: serde
+            usage: "Serialization for events"
+          - name: thiserror
+            usage: "Error definitions"
+            
+        forbidden:
+          - pattern: "sqlx|diesel|sea_orm"
+            reason: "Domain must not know about databases"
+          - pattern: "axum|actix_web|rocket"
+            reason: "Domain must not know about HTTP"
+          - pattern: "rdkafka|lapin"
+            reason: "Domain must not know about messaging"
+          - pattern: "crate::infrastructure"
+            reason: "Violates dependency inversion"
+
+    application:
+      description: "Application layer - use case orchestration"
+      internal_imports:
+        - "use crate::application::ports::*;"
+        - "use crate::application::dtos::*;"
+        - "use crate::domain::*;"
+        - "use crate::shared::errors::*;"
+        
+      external_packages:
+        allowed:
+          - name: async_trait
+            usage: "Async trait methods"
+          - name: tokio
+            usage: "Async runtime"
+          - name: serde
+            usage: "DTO serialization"
+          - name: tracing
+            usage: "Structured logging"
+            
+        forbidden:
+          - pattern: "sqlx|diesel"
+            reason: "Use ports/traits, not concrete implementations"
+          - pattern: "rdkafka"
+            reason: "Use ports/traits, not concrete implementations"
+          - pattern: "crate::infrastructure::repositories"
+            reason: "Access via port traits only"
+
+    infrastructure:
+      description: "Infrastructure layer - technical implementations"
+      internal_imports:
+        - "use crate::application::ports::*;"
+        - "use crate::domain::*;"
+        - "use crate::shared::errors::*;"
+        - "use crate::infrastructure::config::*;"
+        
+      external_packages:
+        allowed:
+          - name: sqlx
+            usage: "PostgreSQL database access"
+          - name: rdkafka
+            usage: "Kafka client"
+          - name: tokio
+            usage: "Async runtime"
+          - name: serde
+            usage: "Serialization"
+          - name: serde_json
+            usage: "JSON serialization"
+          - name: async_trait
+            usage: "Implementing async port traits"
+          - name: tracing
+            usage: "Logging and instrumentation"
+            
+        forbidden: []
+
+    shared:
+      description: "Shared layer - cross-cutting concerns"
+      internal_imports: []
+      
+      external_packages:
+        allowed:
+          - name: thiserror
+            usage: "Error definitions"
+          - name: uuid
+            usage: "Common types"
+          - name: chrono
+            usage: "Common types"
+          - name: serde
+            usage: "Serialization traits"
+            
+        forbidden:
+          - pattern: "sqlx|rdkafka|axum"
+            reason: "Shared should be technology-agnostic"
+
+  prelude_pattern:
+    description: "No prelude pattern in this template"
+    location: "N/A"
+    example: "Users can add prelude module if desired"
+
+# ============================================================
+# SECTION 19: PROJECT "DON'T DO" RULES
+# ============================================================
+project_donts:
+  description: |
+    Critical rules for maintaining hexagonal architecture integrity.
+    These must be enforced during code review.
+
+  critical:
+    - id: DONT-001
+      rule: "NEVER import infrastructure in domain layer"
+      reason: "Violates hexagonal architecture and dependency inversion"
+      applies_to: [domain]
+      exceptions: []
+      language_examples:
+        rust: |
+          // ❌ WRONG - in src/domain/
+          use crate::infrastructure::repositories::PostgresRepository;
+          use sqlx::PgPool;
+          use rdkafka::producer::FutureProducer;
+          
+          // ✅ CORRECT - in src/domain/
+          use crate::domain::value_objects::Email;
+          use uuid::Uuid;
+          use chrono::DateTime;
+          
+    - id: DONT-002
+      rule: "NEVER put business logic in DTOs"
+      reason: "DTOs are data containers, not domain objects"
+      applies_to: [application]
+      exceptions: []
+      language_examples:
+        rust: |
+          // ❌ WRONG
+          impl UserDTO {
+              fn validate_email(&self) -> bool {
+                  // business logic in DTO
+              }
+          }
+          
+          // ✅ CORRECT
+          impl UserDTO {
+              // Just serialization/deserialization
+          }
+          // Business logic in domain::value_objects::Email
+          
+    - id: DONT-003
+      rule: "NEVER silently ignore errors with unwrap() or expect() in production code"
+      reason: "Causes panics and crashes - use proper error handling"
+      applies_to: [domain, application, infrastructure]
+      exceptions: ["Tests", "Main function initialization"]
+      language_examples:
+        rust: |
+          // ❌ WRONG
+          let config = Settings::load().unwrap();
+          let result = do_something().expect("failed");
+          
+          // ✅ CORRECT
+          let config = Settings::load()
+              .map_err(|e| InfrastructureError::Config(e.to_string()))?;
+          let result = do_something()?;
+          
+    - id: DONT-004
+      rule: "NEVER hardcode secrets, credentials, or environment-specific URLs"
+      reason: "Security risk and breaks environment portability"
+      applies_to: [domain, application, infrastructure]
+      exceptions: []
+      language_examples:
+        rust: |
+          // ❌ WRONG
+          const DATABASE_URL: &str = "postgres://user:pass@localhost/db";
+          const API_KEY: &str = "sk_live_abc123";
+          
+          // ✅ CORRECT
+          let database_url = std::env::var("DATABASE_URL")?;
+          let api_key = std::env::var("API_KEY")?;
+          // Or use Settings::load()
+
+  high:
+    - id: DONT-005
+      rule: "AVOID primitive obsession - use value objects"
+      reason: "Validation scattered everywhere, no type safety"
+      applies_to: [domain]
+      exceptions: ["Internal implementation details"]
+      language_examples:
+        rust: |
+          // ❌ AVOID
+          fn create_user(email: String, age: u32) -> User { ... }
+          
+          // ✅ PREFER
+          fn create_user(email: Email, age: Age) -> User { ... }
+          // Where Email and Age are value objects with validation
+          
+    - id: DONT-006
+      rule: "AVOID implementing port traits in domain layer"
+      reason: "Ports belong to application layer, implementations in infrastructure"
+      applies_to: [domain]
+      exceptions: []
+      language_examples:
+        rust: |
+          // ❌ WRONG - in domain layer
+          impl Repository<User> for UserRepository { ... }
+          
+          // ✅ CORRECT
+          // Port trait defined in: application::ports
+          // Implementation in: infrastructure::repositories
+          
+    - id: DONT-007
+      rule: "AVOID public mutable state"
+      reason: "Breaks encapsulation and makes testing difficult"
+      applies_to: [domain, application]
+      exceptions: []
+      language_examples:
+        rust: |
+          // ❌ AVOID
+          pub struct Order {
+              pub status: OrderStatus,  // public mutable
+          }
+          
+          // ✅ PREFER
+          pub struct Order {
+              status: OrderStatus,  // private
+          }
+          impl Order {
+              pub fn status(&self) -> OrderStatus { ... }
+              pub fn cancel(&mut self) -> Result<()> { ... }
+          }
+          
+    - id: DONT-008
+      rule: "AVOID Clone without reason"
+      reason: "Performance overhead, especially for large types"
+      applies_to: [domain, application, infrastructure]
+      exceptions: ["Genuinely need owned copy"]
+      language_examples:
+        rust: |
+          // ❌ AVOID
+          fn process(data: Vec<u8>) {
+              let copy = data.clone();  // unnecessary
+              use_data(&copy);
+          }
+          
+          // ✅ PREFER
+          fn process(data: &[u8]) {  // borrow
+              use_data(data);
+          }
+
+  medium:
+    - id: DONT-009
+      rule: "AVOID wildcard imports except for common preludes"
+      reason: "Makes code harder to understand and navigate"
+      applies_to: [domain, application, infrastructure]
+      exceptions: ["std::prelude::*", "Custom prelude modules"]
+      language_examples:
+        rust: |
+          // ❌ AVOID
+          use crate::domain::*;
+          use uuid::*;
+          
+          // ✅ PREFER
+          use crate::domain::aggregates::Order;
+          use uuid::Uuid;
+          
+    - id: DONT-010
+      rule: "AVOID overly generic names"
+      reason: "Unclear purpose, hard to search"
+      applies_to: [domain, application, infrastructure]
+      exceptions: []
+      language_examples:
+        rust: |
+          // ❌ AVOID
+          struct Manager { ... }
+          struct Handler { ... }
+          struct Service { ... }
+          
+          // ✅ PREFER
+          struct OrderManager { ... }
+          struct PaymentEventHandler { ... }
+          struct UserAuthenticationService { ... }
+
+  project_specific:
+    - id: DONT-P001
+      rule: "DON'T add business logic to this template"
+      reason: "This is a generic template - domain logic belongs in user implementations"
+      applies_to: [domain]
+      correct_pattern: |
+        Keep domain modules empty as structure for users to fill.
+        Add examples in docs/ but not in src/domain/.
+
+# ============================================================
+# SECTION 20: CONSISTENCY VALIDATION
+# ============================================================
+consistency_validation:
+  description: |
+    Validation rules for maintaining architectural consistency.
+    These should be checked in code review or automated linting.
+
+  pre_generation_checks:
+    - check: "architecture_compliance"
+      description: "Verify imports respect layer boundaries"
+      validation: |
+        For each Rust file:
+        1. Identify layer from file path (src/domain/, src/application/, etc.)
+        2. Parse use statements
+        3. Check against allowed imports in common_imports
+        4. Fail if forbidden pattern detected
+        
+        Example violations:
+        - src/domain/aggregates/order.rs imports sqlx
+        - src/application/services/user_service.rs imports infrastructure::repositories::UserRepo (should use port trait)
+        
+    - check: "naming_convention"
+      description: "snake_case for all Rust code"
+      validation: |
+        Rust enforces snake_case for functions, variables, modules.
+        PascalCase for types (structs, enums, traits).
+        SCREAMING_SNAKE_CASE for constants.
+        
+    - check: "forbidden_patterns"
+      description: "Check project_donts rules"
+      validation: |
+        Run clippy with custom lints.
+        Check for unwrap() and expect() outside tests.
+        Check for hardcoded secrets/URLs.
+
+  post_generation_checks:
+    - check: "error_handling_pattern"
+      description: "Errors use Result<T, E> not panic"
+      validation: |
+        All public functions return Result.
+        Only panic in unrecoverable situations.
+        Use ? operator for error propagation.
+        
+    - check: "test_coverage_impact"
+      description: "Domain logic must have tests"
+      validation: |
+        If adding domain logic, add tests.
+        Run: cargo tarpaulin or cargo-llvm-cov.
+        Target: 80% coverage for domain layer.
+
+  cross_reference_validation:
+    - rule: "modules_exist"
+      description: "Referenced modules must exist"
+      validation: "cargo check will fail if imports are invalid"
+      
+    - rule: "ports_implemented"
+      description: "Infrastructure types implement port traits"
+      validation: "Compiler enforces trait implementation"
+
+  output_format:
+    on_violation:
+      template: |
+        ⚠️ VIOLATION: {rule_id}
+        File: {file_path}:{line}
+        Problem: {description}
+        Fix: {suggested_fix}
+        
+    on_success:
+      template: "✅ All checks passed"
+
+# ============================================================
+# METADATA
+# ============================================================
+_metadata:
+  last_updated: "2025-12-04T11:08:00Z"
+  template_version: v4.2
+  updated_layers:
+    - domain
+    - application
+    - infrastructure
+    - shared
+    
+  generation_stats:
+    total_files_scanned: 48
+    total_lines_of_code: 1459
+    generation_time_seconds: "Auto-generated"
+    
+  schema_completeness:
+    total_sections: 20
+    mandatory_sections:
+      - overview
+      - architecture
+      - layers
+      - error_handling
+      - common_imports
+      - project_donts
+    optional_sections:
+      - business_flows
+      - api_contracts
+      - deployment
+      - health_metrics
+      - architectural_decisions
+      - responsibility_matrix
+      - evolution
+      - data_model
+      - security
+      - testing_strategy
+      - design_patterns
+      - historical_context
+      - development_ecosystem
+      - consistency_validation
+    implemented_sections:
+      - overview
+      - architecture
+      - business_flows
+      - api_contracts
+      - deployment
+      - health_metrics
+      - architectural_decisions
+      - responsibility_matrix
+      - domain
+      - application
+      - infrastructure
+      - shared
+      - evolution
+      - data_model
+      - security
+      - testing_strategy
+      - error_handling
+      - design_patterns
+      - historical_context
+      - development_ecosystem
+      - common_imports
+      - project_donts
+      - consistency_validation
+
+  notes:
+    - "This is a comprehensive documentation of the Rust hexagonal architecture template"
+    - "Template is intentionally minimal - users implement domain logic"
+    - "Infrastructure components are production-ready and fully implemented"
+    - "Follow project_donts rules to maintain architectural integrity"
+    - "See docs/ folder for additional guides and examples"
