@@ -87,7 +87,7 @@
 |---------|-----------|
 | **Função** | Ingestão de dados de mercado em tempo real |
 | **Entrada** | Binance WebSocket (klines, trades, ticker) |
-| **Saída** | Tópico `crypto-listener.prices` |
+| **Saída** | Tópico `crypto.listener.prices` |
 | **Persistência** | TimescaleDB (dados históricos) |
 
 #### ✅ RESPONSABILIDADES:
@@ -108,9 +108,9 @@
 #### Tópicos Kafka:
 | Tipo | Tópico | Descrição |
 |------|--------|-----------|
-| **PRODUZ** | `crypto-listener.prices` | Preços e candles em tempo real |
-| **CONSOME** | `crypto-listener.subscribe` | Comandos de inscrição em símbolos |
-| **CONSOME** | `crypto-listener.unsubscribe` | Comandos de cancelamento |
+| **PRODUZ** | `crypto.listener.prices` | Preços e candles em tempo real |
+| **CONSOME** | `crypto.listener.subscribe` | Comandos de inscrição em símbolos |
+| **CONSOME** | `crypto.listener.unsubscribe` | Comandos de cancelamento |
 
 ---
 
@@ -120,7 +120,7 @@
 |---------|-----------|
 | **Função** | Gateway HTTP para integrações externas |
 | **Entrada** | HTTP POST (TradingView, Alertatron, etc.) |
-| **Saída** | Tópicos `signals.buy`, `signals.sell` |
+| **Saída** | Tópicos `crypto.webhook.signals.buy`, `crypto.webhook.signals.sell` |
 | **Persistência** | PostgreSQL (logs de requisições) |
 
 #### ✅ RESPONSABILIDADES:
@@ -142,9 +142,9 @@
 #### Tópicos Kafka:
 | Tipo | Tópico | Descrição |
 |------|--------|-----------|
-| **PRODUZ** | `signals.buy` | Sinais de compra normalizados |
-| **PRODUZ** | `signals.sell` | Sinais de venda normalizados |
-| **PRODUZ** | `notifications.send` | Notificações sobre webhooks recebidos |
+| **PRODUZ** | `crypto.webhook.signals.buy` | Sinais de compra normalizados |
+| **PRODUZ** | `crypto.webhook.signals.sell` | Sinais de venda normalizados |
+| **PRODUZ** | `crypto.notifications.send` | Notificações sobre webhooks recebidos |
 
 ---
 
@@ -153,8 +153,8 @@
 | Aspecto | Descrição |
 |---------|-----------|
 | **Função** | Análise técnica e geração de sinais |
-| **Entrada** | Tópico `crypto-listener.prices` |
-| **Saída** | Tópicos `signals.buy`, `signals.sell` |
+| **Entrada** | Tópico `crypto.listener.prices` |
+| **Saída** | Tópicos `crypto.signals.buy`, `crypto.signals.sell` |
 | **Persistência** | PostgreSQL (histórico de sinais) |
 
 #### ✅ RESPONSABILIDADES:
@@ -176,11 +176,11 @@
 #### Tópicos Kafka:
 | Tipo | Tópico | Descrição |
 |------|--------|-----------|
-| **CONSOME** | `crypto-listener.prices` | Preços em tempo real |
-| **CONSOME** | `management.strategies.control` | Comandos de controle |
-| **PRODUZ** | `signals.buy` | Sinais de compra gerados |
-| **PRODUZ** | `signals.sell` | Sinais de venda gerados |
-| **PRODUZ** | `notifications.send` | Alertas sobre sinais |
+| **CONSOME** | `crypto.listener.prices` | Preços em tempo real |
+| **CONSOME** | `crypto.management.control.strategies` | Comandos de controle |
+| **PRODUZ** | `crypto.signals.buy` | Sinais de compra gerados |
+| **PRODUZ** | `crypto.signals.sell` | Sinais de venda gerados |
+| **PRODUZ** | `crypto.notifications.send` | Alertas sobre sinais |
 
 ---
 
@@ -189,8 +189,8 @@
 | Aspecto | Descrição |
 |---------|-----------|
 | **Função** | Execução e gerenciamento de ordens |
-| **Entrada** | Tópicos `signals.buy`, `signals.sell` |
-| **Saída** | Tópico `orders.events` |
+| **Entrada** | Tópicos `crypto.signals.*`, `crypto.webhook.signals.*` |
+| **Saída** | Tópico `crypto.trader.orders` |
 | **Persistência** | PostgreSQL (ordens locais) |
 
 #### ✅ RESPONSABILIDADES:
@@ -213,11 +213,14 @@
 #### Tópicos Kafka:
 | Tipo | Tópico | Descrição |
 |------|--------|-----------|
-| **CONSOME** | `signals.buy` | Sinais de compra |
-| **CONSOME** | `signals.sell` | Sinais de venda |
-| **CONSOME** | `management.control.orders` | Comandos do management |
-| **PRODUZ** | `orders.events` | Eventos de ordens (filled, cancelled, etc.) |
-| **PRODUZ** | `notifications.send` | Alertas sobre execuções |
+| **CONSOME** | `crypto.signals.buy` | Sinais de compra (internos) |
+| **CONSOME** | `crypto.signals.sell` | Sinais de venda (internos) |
+| **CONSOME** | `crypto.webhook.signals.buy` | Sinais de compra (externos) |
+| **CONSOME** | `crypto.webhook.signals.sell` | Sinais de venda (externos) |
+| **CONSOME** | `crypto.management.control.risk` | Comandos de risco |
+| **CONSOME** | `crypto.management.control.mode` | Comandos de modo |
+| **PRODUZ** | `crypto.trader.orders` | Eventos de ordens (filled, cancelled, etc.) |
+| **PRODUZ** | `crypto.notifications.send` | Alertas sobre execuções |
 
 ---
 
@@ -252,17 +255,21 @@
 #### Tópicos Kafka:
 | Tipo | Tópico | Descrição |
 |------|--------|-----------|
-| **CONSOME** | `orders.events` | Eventos de ordens |
-| **CONSOME** | `signals.buy` | Sinais de compra (tracking) |
-| **CONSOME** | `signals.sell` | Sinais de venda (tracking) |
-| **CONSOME** | `crypto-listener.prices` | Preços (cálculo P&L) |
-| **PRODUZ** | `management.positions.opened` | Posição aberta |
-| **PRODUZ** | `management.positions.closed` | Posição fechada |
-| **PRODUZ** | `management.positions.updated` | Posição atualizada |
-| **PRODUZ** | `management.control.orders` | Comandos para trader |
-| **PRODUZ** | `management.strategies.control` | Comandos para signals |
-| **PRODUZ** | `crypto-listener.subscribe` | Comandos para listener |
-| **PRODUZ** | `notifications.send` | Alertas de risco |
+| **CONSOME** | `crypto.trader.orders` | Eventos de ordens |
+| **CONSOME** | `crypto.signals.buy` | Sinais de compra (tracking) |
+| **CONSOME** | `crypto.signals.sell` | Sinais de venda (tracking) |
+| **CONSOME** | `crypto.webhook.signals.buy` | Sinais externos (tracking) |
+| **CONSOME** | `crypto.webhook.signals.sell` | Sinais externos (tracking) |
+| **CONSOME** | `crypto.listener.prices` | Preços (cálculo P&L) |
+| **PRODUZ** | `crypto.management.positions.opened` | Posição aberta |
+| **PRODUZ** | `crypto.management.positions.closed` | Posição fechada |
+| **PRODUZ** | `crypto.management.positions.updated` | Posição atualizada |
+| **PRODUZ** | `crypto.management.control.strategies` | Comandos para signals |
+| **PRODUZ** | `crypto.management.control.risk` | Comandos de risco para trader |
+| **PRODUZ** | `crypto.management.control.mode` | Comandos de modo para trader |
+| **PRODUZ** | `crypto.listener.subscribe` | Comandos para listener |
+| **PRODUZ** | `crypto.listener.unsubscribe` | Comandos para listener |
+| **PRODUZ** | `crypto.notifications.send` | Alertas de risco |
 
 ---
 
@@ -271,7 +278,7 @@
 | Aspecto | Descrição |
 |---------|-----------|
 | **Função** | Distribuição de notificações multi-canal |
-| **Entrada** | Tópico `notifications.send` + eventos de broadcast |
+| **Entrada** | Tópico `crypto.notifications.send` + eventos de broadcast |
 | **Saída** | Telegram, Discord, Email |
 | **Persistência** | PostgreSQL (histórico), Redis (throttling) |
 
@@ -295,9 +302,11 @@
 #### Tópicos Kafka:
 | Tipo | Tópico | Descrição |
 |------|--------|-----------|
-| **CONSOME** | `notifications.send` | Pedidos de notificação |
-| **CONSOME** | `orders.events` | Eventos de ordens (broadcast) |
-| **CONSOME** | `management.positions.*` | Eventos de posição (broadcast) |
+| **CONSOME** | `crypto.notifications.send` | Pedidos de notificação |
+| **CONSOME** | `crypto.trader.orders` | Eventos de ordens (broadcast) |
+| **CONSOME** | `crypto.management.positions.*` | Eventos de posição (broadcast) |
+| **PRODUZ** | `crypto.notifications.delivered` | Confirmação de entrega |
+| **PRODUZ** | `crypto.notifications.failed` | Falha de entrega |
 | **PRODUZ** | `notifications.delivered` | Confirmação de entrega |
 | **PRODUZ** | `notifications.failed` | Falha de entrega |
 
@@ -353,39 +362,49 @@
 
 ## 📨 Mapa Completo de Tópicos Kafka
 
-### Tópicos de Dados de Mercado
-| Tópico | Produtor | Consumidores |
-|--------|----------|--------------|
-| `crypto-listener.prices` | crypto-listener | crypto-signals, crypto-management |
-| `crypto-listener.subscribe` | crypto-management | crypto-listener |
-| `crypto-listener.unsubscribe` | crypto-management | crypto-listener |
+> **PADRÃO:** `crypto.{projeto}.{recurso}.{ação}` (sempre usar `.` como separador)  
+> **Guia de Migração:** `_base/KAFKA_TOPICS_MIGRATION.md`
 
-### Tópicos de Sinais
-| Tópico | Produtores | Consumidores |
-|--------|------------|--------------|
-| `signals.buy` | crypto-signals, crypto-webhook | crypto-trader, crypto-management |
-| `signals.sell` | crypto-signals, crypto-webhook | crypto-trader, crypto-management |
+### Tópicos de Dados de Mercado (crypto.listener.*)
+| Tópico | Tipo | Produtor | Consumidores |
+|--------|------|----------|--------------|
+| `crypto.listener.prices` | Evento | crypto-listener | crypto-signals, crypto-management |
+| `crypto.listener.subscribe` | Comando | crypto-management | crypto-listener |
+| `crypto.listener.unsubscribe` | Comando | crypto-management | crypto-listener |
 
-### Tópicos de Ordens
-| Tópico | Produtor | Consumidores |
-|--------|----------|--------------|
-| `orders.events` | crypto-trader | crypto-management, crypto-notifications |
+### Tópicos de Sinais Internos (crypto.signals.*)
+| Tópico | Tipo | Produtor | Consumidores |
+|--------|------|----------|--------------|
+| `crypto.signals.buy` | Evento | crypto-signals | crypto-trader, crypto-management |
+| `crypto.signals.sell` | Evento | crypto-signals | crypto-trader, crypto-management |
 
-### Tópicos de Management
-| Tópico | Produtor | Consumidores |
-|--------|----------|--------------|
-| `management.positions.opened` | crypto-management | crypto-notifications |
-| `management.positions.closed` | crypto-management | crypto-notifications |
-| `management.positions.updated` | crypto-management | crypto-notifications |
-| `management.control.orders` | crypto-management | crypto-trader |
-| `management.strategies.control` | crypto-management | crypto-signals |
+### Tópicos de Sinais Externos (crypto.webhook.*)
+| Tópico | Tipo | Produtor | Consumidores |
+|--------|------|----------|--------------|
+| `crypto.webhook.signals.buy` | Evento | crypto-webhook | crypto-trader, crypto-management |
+| `crypto.webhook.signals.sell` | Evento | crypto-webhook | crypto-trader, crypto-management |
 
-### Tópicos de Notificações
-| Tópico | Produtores | Consumidor |
-|--------|------------|------------|
-| `notifications.send` | Todos | crypto-notifications |
-| `notifications.delivered` | crypto-notifications | (monitoring) |
-| `notifications.failed` | crypto-notifications | (monitoring/retry) |
+### Tópicos de Ordens (crypto.trader.*)
+| Tópico | Tipo | Produtor | Consumidores |
+|--------|------|----------|--------------|
+| `crypto.trader.orders` | Evento | crypto-trader | crypto-management, crypto-notifications |
+
+### Tópicos de Gestão (crypto.management.*)
+| Tópico | Tipo | Produtor | Consumidores |
+|--------|------|----------|--------------|
+| `crypto.management.positions.opened` | Evento | crypto-management | crypto-notifications |
+| `crypto.management.positions.closed` | Evento | crypto-management | crypto-notifications |
+| `crypto.management.positions.updated` | Evento | crypto-management | crypto-notifications |
+| `crypto.management.control.strategies` | Comando | crypto-management | crypto-signals |
+| `crypto.management.control.risk` | Comando | crypto-management | crypto-trader |
+| `crypto.management.control.mode` | Comando | crypto-management | crypto-trader |
+
+### Tópicos de Notificações (crypto.notifications.*)
+| Tópico | Tipo | Produtores | Consumidor |
+|--------|------|------------|------------|
+| `crypto.notifications.send` | Comando | TODOS | crypto-notifications |
+| `crypto.notifications.delivered` | Evento | crypto-notifications | (monitoring) |
+| `crypto.notifications.failed` | Evento | crypto-notifications | crypto-management |
 
 ---
 
@@ -394,11 +413,11 @@
 ### Caso 1: Sinal Interno Gera Trade
 
 ```
-1. crypto-listener → publica preço em crypto-listener.prices
+1. crypto-listener → publica preço em crypto.listener.prices
 2. crypto-signals  → consome preço, calcula RSI, gera sinal
-3. crypto-signals  → publica sinal em signals.buy
+3. crypto-signals  → publica sinal em crypto.signals.buy
 4. crypto-trader   → consome sinal, executa ordem
-5. crypto-trader   → publica evento em orders.events
+5. crypto-trader   → publica evento em crypto.trader.orders
 6. crypto-management → atualiza posição
 7. crypto-notifications → envia alerta
 ```
@@ -408,9 +427,9 @@
 ```
 1. TradingView     → envia POST para crypto-webhook
 2. crypto-webhook  → valida, normaliza
-3. crypto-webhook  → publica sinal em signals.buy
+3. crypto-webhook  → publica sinal em crypto.webhook.signals.buy
 4. crypto-trader   → consome sinal, executa ordem
-5. crypto-trader   → publica evento em orders.events
+5. crypto-trader   → publica evento em crypto.trader.orders
 6. crypto-management → atualiza posição
 7. crypto-notifications → envia alerta
 ```
@@ -421,8 +440,8 @@
 1. Usuário         → executa ordem manualmente na Binance
 2. crypto-management → detecta via User Data Stream
 3. crypto-management → cria posição
-4. crypto-management → publica em management.positions.opened
-5. crypto-management → publica crypto-listener.subscribe
+4. crypto-management → publica em crypto.management.positions.opened
+5. crypto-management → publica crypto.listener.subscribe
 6. crypto-listener → começa a monitorar símbolo
 7. crypto-notifications → envia alerta
 ```
@@ -431,9 +450,9 @@
 
 ```
 1. crypto-management → detecta drawdown > max permitido
-2. crypto-management → publica management.control.orders (CLOSE_ALL)
-3. crypto-trader     → fecha todas as posições
-4. crypto-management → publica management.strategies.control (DISABLE)
+2. crypto-management → publica crypto.management.control.risk (HALT_TRADING)
+3. crypto-trader     → para de processar sinais
+4. crypto-management → publica crypto.management.control.strategies (DISABLE)
 5. crypto-signals    → desabilita geração de sinais
 6. crypto-notifications → envia alerta urgente
 ```
@@ -463,7 +482,10 @@ async fn close_position() {
     trader_api.execute_order().await;  // ❌ NUNCA HTTP entre projetos!
     
     // ✅ CORRETO:
-    kafka.send("management.control.orders", CloseCommand { ... }).await;
+    kafka.send("crypto.management.control.risk", RiskControl {
+        action: HaltTrading,
+        reason: "Max drawdown exceeded",
+    }).await;
 }
 ```
 

@@ -55,12 +55,15 @@ Este ecossistema consiste em **6 microserviços Rust** que se comunicam **EXCLUS
 
 | Projeto | Mantra | Função | Entrada | Saída |
 |---------|--------|--------|---------|-------|
-| **crypto-listener** | "EU ESCUTO O MERCADO" | Ingestão via WebSocket | Binance WS | `crypto-listener.prices` |
-| **crypto-webhook** | "EU RECEBO E NORMALIZO" | Gateway HTTP | HTTP POST | `signals.buy/sell` |
-| **crypto-signals** | "EU ANALISO E SINALIZO" | Análise técnica | `*.prices` | `signals.buy/sell` |
-| **crypto-trader** | "EU EXECUTO ORDENS" | Execução na exchange | `signals.*` | `orders.events` |
-| **crypto-management** | "EU ORQUESTRO" | Posições e risco | `orders.*`, `signals.*` | `management.*` |
-| **crypto-notifications** | "EU NOTIFICO" | Alertas multi-canal | `notifications.send` | Telegram/Discord |
+| **crypto-listener** | "EU ESCUTO O MERCADO" | Ingestão via WebSocket | Binance WS | `crypto.listener.prices` |
+| **crypto-webhook** | "EU RECEBO E NORMALIZO" | Gateway HTTP | HTTP POST | `crypto.webhook.signals.*` |
+| **crypto-signals** | "EU ANALISO E SINALIZO" | Análise técnica | `crypto.listener.prices` | `crypto.signals.buy/sell` |
+| **crypto-trader** | "EU EXECUTO ORDENS" | Execução na exchange | `crypto.*.signals.*` | `crypto.trader.orders` |
+| **crypto-management** | "EU ORQUESTRO" | Posições e risco | `crypto.trader.orders` | `crypto.management.*` |
+| **crypto-notifications** | "EU NOTIFICO" | Alertas multi-canal | `crypto.notifications.send` | Telegram/Discord |
+
+> ⚠️ **ATENÇÃO:** Todos os tópicos Kafka seguem o padrão `crypto.{projeto}.{recurso}.{ação}`  
+> Consulte: `_base/KAFKA_TOPICS_MIGRATION.md` para mapa completo
 
 ---
 
@@ -112,7 +115,7 @@ Do arquivo `IMPLEMENTATION_PROGRESS.md`, extraia:
 
 ```rust
 // ✅ CORRETO
-kafka.send("signals.buy", signal).await;
+kafka.send("crypto.signals.buy", signal).await;
 
 // ❌ PROIBIDO - Chamar outro serviço via HTTP
 http_client.post("http://crypto-trader/api/order").await;
@@ -507,26 +510,53 @@ pub type AppResult<T> = Result<T, ApplicationError>;
 
 ## 🗺️ MAPA DE TÓPICOS KAFKA
 
+> **PADRÃO:** `crypto.{projeto}.{recurso}.{ação}` (sempre usar `.` como separador)  
+> **Guia completo:** `_base/KAFKA_TOPICS_MIGRATION.md`
+
 ### Produtores por Projeto
 
 | Projeto | Produz para |
 |---------|-------------|
-| crypto-listener | `crypto-listener.prices` |
-| crypto-webhook | `signals.buy`, `signals.sell`, `notifications.send` |
-| crypto-signals | `signals.buy`, `signals.sell`, `notifications.send` |
-| crypto-trader | `orders.events`, `notifications.send` |
-| crypto-management | `management.positions.*`, `management.control.*`, `crypto-listener.subscribe`, `notifications.send` |
-| crypto-notifications | `notifications.delivered`, `notifications.failed` |
+| crypto-listener | `crypto.listener.prices` |
+| crypto-webhook | `crypto.webhook.signals.buy`, `crypto.webhook.signals.sell`, `crypto.notifications.send` |
+| crypto-signals | `crypto.signals.buy`, `crypto.signals.sell`, `crypto.notifications.send` |
+| crypto-trader | `crypto.trader.orders`, `crypto.notifications.send` |
+| crypto-management | `crypto.management.positions.*`, `crypto.management.control.*`, `crypto.listener.subscribe`, `crypto.notifications.send` |
+| crypto-notifications | `crypto.notifications.delivered`, `crypto.notifications.failed` |
 
 ### Consumidores por Projeto
 
 | Projeto | Consome de |
 |---------|------------|
-| crypto-listener | `crypto-listener.subscribe`, `crypto-listener.unsubscribe` |
-| crypto-signals | `crypto-listener.prices`, `management.strategies.control` |
-| crypto-trader | `signals.buy`, `signals.sell`, `management.control.orders` |
-| crypto-management | `orders.events`, `signals.*`, `crypto-listener.prices` |
-| crypto-notifications | `notifications.send`, `orders.events`, `management.positions.*` |
+| crypto-listener | `crypto.listener.subscribe`, `crypto.listener.unsubscribe` |
+| crypto-signals | `crypto.listener.prices`, `crypto.management.control.strategies` |
+| crypto-trader | `crypto.signals.buy/sell`, `crypto.webhook.signals.buy/sell`, `crypto.management.control.risk/mode` |
+| crypto-management | `crypto.trader.orders`, `crypto.signals.*`, `crypto.webhook.signals.*`, `crypto.listener.prices` |
+| crypto-notifications | `crypto.notifications.send`, `crypto.trader.orders`, `crypto.management.positions.*` |
+
+### Diagrama de Fluxo
+
+```
+crypto-listener ──► crypto.listener.prices ──► crypto-signals ──► crypto.signals.buy/sell ──┐
+                                                                                             │
+                                                crypto-webhook ──► crypto.webhook.signals.* ─┤
+                                                                                             │
+                                                                                             ▼
+                                                                                      crypto-trader
+                                                                                             │
+                                              crypto.trader.orders ◄─────────────────────────┘
+                                                       │
+                                                       ▼
+                                              crypto-management
+                                                       │
+                    ┌──────────────────────────────────┼──────────────────────────────────┐
+                    ▼                                  ▼                                  ▼
+      crypto.management.positions.*    crypto.management.control.*     crypto.listener.subscribe
+                    │                                  │
+                    └──────────────────────────────────┼──────────────────────────────────┐
+                                                       ▼                                  ▼
+                                        crypto.notifications.send ──► crypto-notifications
+```
 
 ---
 
