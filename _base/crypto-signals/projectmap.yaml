@@ -114,7 +114,7 @@ architecture:
     signal_publisher:
       description: Publica sinais no Kafka
       technology: rdkafka
-      topics: [signals.buy, signals.sell]
+      topics: [crypto.signals.buy, crypto.signals.sell]
       
     backtester:
       description: Testa estratégias com dados históricos
@@ -142,7 +142,7 @@ architecture:
 
 kafka_topics:
   consumed:
-    - name: crypto-listener.prices
+    - name: crypto.listener.prices
       description: Preços em tempo real
       producer: crypto-listener
       consumer_group: crypto-signals-group
@@ -161,7 +161,7 @@ kafka_topics:
           "timestamp": "2025-10-16T22:00:00Z"
         }
 
-    - name: management.control.strategy
+    - name: crypto.management.control.strategy
       description: Comandos de controle de estratégias
       producer: crypto-management
       
@@ -172,7 +172,7 @@ kafka_topics:
         params: object (parâmetros da estratégia)
 
   produced:
-    - name: signals.buy
+    - name: crypto.signals.buy
       description: Sinais de compra gerados por estratégias
       consumers:
         - crypto-trader
@@ -260,9 +260,9 @@ kafka_topics:
           "timestamp": "2025-10-16T22:00:15Z"
         }
 
-    - name: signals.sell
+    - name: crypto.signals.sell
       description: Sinais de venda
-      schema: Similar ao signals.buy
+      schema: Similar ao crypto.signals.buy
 
 
 # ┌─────────────────────────────────────────────────────────────┐
@@ -984,7 +984,7 @@ flows:
       - step: 11
         component: Signal Publisher
         action: |
-          - Publica SignalDTO em signals.buy ou signals.sell
+          - Publica SignalDTO em crypto.signals.buy ou crypto.signals.sell
           - Serializa para JSON
           
       - step: 12
@@ -1106,8 +1106,8 @@ configuration:
         default: "crypto-signals-group"
       topics:
         prices: "crypto-listener.prices"
-        signals_buy: "signals.buy"
-        signals_sell: "signals.sell"
+        signals_buy: "crypto.signals.buy"
+        signals_sell: "crypto.signals.sell"
         
     redis:
       url:

@@ -109,7 +109,7 @@ architecture:
 
 kafka_topics:
   consumed:
-    - name: notifications.send
+    - name: crypto.notifications.send
       description: Tópico principal de notificações
       producers:
         - crypto-management
@@ -175,8 +175,36 @@ kafka_topics:
           "timestamp": "2025-10-16T22:00:00Z"
         }
 
+    - name: crypto.management.balance.updated
+      description: Eventos de atualização de saldo da carteira
+      producer: crypto-management
+      consumer_group: crypto-notifications-group
+      
+      use_case: |
+        - Notificar depósitos significativos
+        - Alertar sobre saques
+        - Informar saldo baixo (threshold configurável)
+        - Resumo após trades
+        
+      notification_templates:
+        deposit: "💰 Depósito de {change_amount} {asset} detectado. Novo saldo: {total}"
+        withdrawal: "📤 Saque de {change_amount} {asset}. Novo saldo: {total}"
+        trade: "📊 Saldo {asset} atualizado após trade. Disponível: {free}, Em ordens: {locked}"
+        low_balance: "⚠️ Alerta: Saldo de {asset} abaixo do mínimo ({total})"
+        
+      schema:
+        event_id: UUID
+        asset: string
+        free: number
+        locked: number
+        total: number
+        change_amount: number
+        change_reason: enum [TRADE, DEPOSIT, WITHDRAWAL, FEE, TRANSFER, UNKNOWN]
+        related_order_id: optional string
+        timestamp: ISO8601
+
   produced:
-    - name: notifications.delivered
+    - name: crypto.notifications.delivered
       description: Confirmação de entrega
       schema:
         notification_id: string

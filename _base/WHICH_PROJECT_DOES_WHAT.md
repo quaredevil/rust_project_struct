@@ -38,25 +38,25 @@
 │   "EU NORMALIZO"    │                      │
 └─────────┬───────────┘                      │
           │                                  │
-          │ signals.buy/sell                 │ crypto-listener.prices
+          │ crypto.webhook.signals.*         │ crypto.listener.prices
           │                                  │
           ▼                                  ▼
 ┌────────────────────────────────────────────────────────────┐
 │                         KAFKA                               │
 ├────────────────────────────────────────────────────────────┤
-│  signals.buy  │  signals.sell  │  orders.events  │  ...    │
-└─────────┬────────────┬────────────────┬────────────────────┘
-          │            │                │
-          ▼            ▼                │
-┌─────────────────────┐                 │
-│   crypto-signals    │◄────────────────┘ (preços)
+│  crypto.*.signals   │  crypto.trader.orders  │  ...        │
+└─────────┬────────────────────┬─────────────────────────────┘
+          │                    │
+          ▼                    │
+┌─────────────────────┐        │
+│   crypto-signals    │◄───────┘ (preços)
 │   "EU ANALISO"      │
 └─────────┬───────────┘
-          │ signals.buy/sell
+          │ crypto.signals.buy/sell
           ▼
 ┌─────────────────────┐
 │   crypto-trader     │─────────────────┐
-│   "EU EXECUTO"      │                 │ orders.events
+│   "EU EXECUTO"      │                 │ crypto.trader.orders
 └─────────┬───────────┘                 │
           │                             ▼
           │ Binance API        ┌─────────────────────┐
@@ -64,8 +64,8 @@
     ┌──────────┐               │   "EU ORQUESTRO"    │
     │ Exchange │               └─────────┬───────────┘
     └──────────┘                         │
-                                         │ management.positions.*
-                                         │ notifications.send
+                                         │ crypto.management.positions.*
+                                         │ crypto.notifications.send
                                          ▼
                                ┌─────────────────────┐
                                │crypto-notifications │
@@ -307,8 +307,7 @@
 | **CONSOME** | `crypto.management.positions.*` | Eventos de posição (broadcast) |
 | **PRODUZ** | `crypto.notifications.delivered` | Confirmação de entrega |
 | **PRODUZ** | `crypto.notifications.failed` | Falha de entrega |
-| **PRODUZ** | `notifications.delivered` | Confirmação de entrega |
-| **PRODUZ** | `notifications.failed` | Falha de entrega |
+| **PRODUZ** | `crypto.notifications.throttled` | Notificação throttled |
 
 ---
 
@@ -362,8 +361,8 @@
 
 ## 📨 Mapa Completo de Tópicos Kafka
 
-> **PADRÃO:** `crypto.{projeto}.{recurso}.{ação}` (sempre usar `.` como separador)  
-> **Guia de Migração:** `_base/KAFKA_TOPICS_MIGRATION.md`
+> **PADRÃO:** `crypto.{projeto}.{recurso}` (sempre usar `.` como separador)  
+> **Guia de Migração:** `_base/KAFKA_ARCHITECTURE_UPDATE_PROMPT.md`
 
 ### Tópicos de Dados de Mercado (crypto.listener.*)
 | Tópico | Tipo | Produtor | Consumidores |
@@ -372,17 +371,14 @@
 | `crypto.listener.subscribe` | Comando | crypto-management | crypto-listener |
 | `crypto.listener.unsubscribe` | Comando | crypto-management | crypto-listener |
 
-### Tópicos de Sinais Internos (crypto.signals.*)
-| Tópico | Tipo | Produtor | Consumidores |
-|--------|------|----------|--------------|
-| `crypto.signals.buy` | Evento | crypto-signals | crypto-trader, crypto-management |
-| `crypto.signals.sell` | Evento | crypto-signals | crypto-trader, crypto-management |
+### Tópicos de Sinais (crypto.signals.*) - UNIFICADOS
+| Tópico | Tipo | Produtores | Consumidores | Campo `source` |
+|--------|------|------------|--------------|----------------|
+| `crypto.signals.buy` | Evento | crypto-signals, crypto-webhook | crypto-trader, crypto-management | INTERNAL, WEBHOOK, MANUAL |
+| `crypto.signals.sell` | Evento | crypto-signals, crypto-webhook | crypto-trader, crypto-management | INTERNAL, WEBHOOK, MANUAL |
 
-### Tópicos de Sinais Externos (crypto.webhook.*)
-| Tópico | Tipo | Produtor | Consumidores |
-|--------|------|----------|--------------|
-| `crypto.webhook.signals.buy` | Evento | crypto-webhook | crypto-trader, crypto-management |
-| `crypto.webhook.signals.sell` | Evento | crypto-webhook | crypto-trader, crypto-management |
+> **NOTA:** Os tópicos `crypto.webhook.signals.*` foram **DEPRECADOS** e unificados com `crypto.signals.*`.
+> Diferenciação é feita pelo campo `source` no payload.
 
 ### Tópicos de Ordens (crypto.trader.*)
 | Tópico | Tipo | Produtor | Consumidores |
@@ -395,6 +391,7 @@
 | `crypto.management.positions.opened` | Evento | crypto-management | crypto-notifications |
 | `crypto.management.positions.closed` | Evento | crypto-management | crypto-notifications |
 | `crypto.management.positions.updated` | Evento | crypto-management | crypto-notifications |
+| `crypto.management.balance.updated` | Evento | crypto-management | crypto-notifications | **NOVO** |
 | `crypto.management.control.strategies` | Comando | crypto-management | crypto-signals |
 | `crypto.management.control.risk` | Comando | crypto-management | crypto-trader |
 | `crypto.management.control.mode` | Comando | crypto-management | crypto-trader |

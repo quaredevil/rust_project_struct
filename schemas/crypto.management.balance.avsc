@@ -1,0 +1,59 @@
+{
+  "type": "record",
+  "name": "BalanceUpdated",
+  "namespace": "com.crypto.management.balance",
+  "doc": "Event emitted when a wallet asset balance is updated",
+  "fields": [
+    {
+      "name": "event_id",
+      "type": "string",
+      "doc": "Unique event identifier (UUID)"
+    },
+    {
+      "name": "asset",
+      "type": "string",
+      "doc": "Asset symbol (e.g., BTC, USDT, ETH)"
+    },
+    {
+      "name": "free",
+      "type": "double",
+      "doc": "Available balance for trading"
+    },
+    {
+      "name": "locked",
+      "type": "double",
+      "doc": "Balance locked in open orders"
+    },
+    {
+      "name": "total",
+      "type": "double",
+      "doc": "Total balance (free + locked)"
+    },
+    {
+      "name": "change_amount",
+      "type": "double",
+      "doc": "Balance change amount (+/-)"
+    },
+    {
+      "name": "change_reason",
+      "type": {
+        "type": "enum",
+        "name": "BalanceChangeReason",
+        "symbols": ["TRADE", "DEPOSIT", "WITHDRAWAL", "FEE", "TRANSFER", "UNKNOWN"]
+      },
+      "doc": "Reason for balance change"
+    },
+    {
+      "name": "related_order_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Related order ID when change_reason is TRADE or FEE"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Event timestamp"
+    }
+  ]
+}

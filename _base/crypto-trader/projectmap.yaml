@@ -54,9 +54,12 @@ architecture:
   
   components:
     signal_consumer:
-      description: Consome sinais de trading do Kafka
+      description: Consome sinais de trading do Kafka (internos e externos unificados)
       technology: rdkafka (librdkafka wrapper)
-      topics: [signals.buy, signals.sell]
+      topics: [crypto.signals.buy, crypto.signals.sell]
+      note: |
+        Sinais de crypto-webhook agora são publicados nos mesmos tópicos.
+        Diferenciação via campo source: INTERNAL | WEBHOOK | MANUAL
       
     order_validator:
       description: Valida ordens contra regras de negócio
@@ -109,7 +112,7 @@ architecture:
     event_publisher:
       description: Publica eventos de ordens
       technology: rdkafka
-      topic: orders.events
+      topic: crypto.trader.orders
       
     metrics:
       description: Coleta métricas
@@ -118,7 +121,7 @@ architecture:
   data_flow: |
     Kafka (signals) → Signal Consumer → Validators → Order Executor → Exchange
                                            ↓
-                                    Event Publisher → Kafka (orders.events)
+                                    Event Publisher → Kafka (crypto.trader.orders)
                                            ↓
                                     Stop Manager (monitora)
                                            ↓
@@ -131,8 +134,10 @@ architecture:
 
 kafka_topics:
   consumed:
-    - name: signals.buy
-      description: Sinais de compra gerados por crypto-signals ou crypto-webhook
+    - name: crypto.signals.buy
+      description: |
+        Sinais de compra unificados.
+        Produtores: crypto-signals (source=INTERNAL), crypto-webhook (source=WEBHOOK)
       producers:
         - crypto-signals
         - crypto-webhook
@@ -196,11 +201,17 @@ kafka_topics:
           "timestamp": "2025-10-16T22:00:00Z"
         }
 
-    - name: signals.sell
-      description: Sinais de venda
-      schema: Similar ao signals.buy
+    - name: crypto.signals.sell
+      description: |
+        Sinais de venda unificados.
+        Produtores: crypto-signals (source=INTERNAL), crypto-webhook (source=WEBHOOK)
+      producers:
+        - crypto-signals
+        - crypto-webhook
+      consumer_group: crypto-trader-group
+      schema: Similar ao crypto.signals.buy
       
-    - name: management.control.risk
+    - name: crypto.management.control.risk
       description: Atualizações de parâmetros de risco do crypto-management
       schema:
         action: enum [UPDATE_LIMITS, HALT_TRADING, RESUME_TRADING]
@@ -208,13 +219,13 @@ kafka_topics:
         max_total_exposure: number
         max_daily_loss: number
         
-    - name: management.control.mode
+    - name: crypto.management.control.mode
       description: Mudanças de modo de operação
       schema:
         mode: enum [PAPER, LIVE, DRY_RUN]
 
   produced:
-    - name: orders.events
+    - name: crypto.trader.orders
       description: Eventos de ordens executadas
       
       schema:
@@ -424,7 +435,7 @@ project_structure:
     │   │   │   └── risk_config.rs           # Configurações de risco (limites, drawdown)
     │   │   ├── messaging/                   # Messaging & Event Streaming
     │   │   │   ├── mod.rs
-    │   │   │   ├── kafka_signal_consumer.rs # Consumer de sinais (signals.buy/sell)
+    │   │   │   ├── kafka_signal_consumer.rs # Consumer de sinais (crypto.signals.buy/crypto.signals.sell)
     │   │   │   ├── kafka_order_publisher.rs # Publisher de eventos de ordens
     │   │   │   └── signal_handler.rs        # Handler que processa sinais recebidos
     │   │   ├── exchanges/                   # Implementações de exchanges (Adapters)
@@ -844,8 +855,8 @@ flows:
       - step: 10
         component: Event Publisher
         action: |
-          - Publica orders.events (CREATED)
-          - Publica orders.events (FILLED)
+          - Publica crypto.trader.orders (CREATED)
+          - Publica crypto.trader.orders (FILLED)
         
       - step: 11
         component: Order Repository
@@ -867,7 +878,7 @@ flows:
       [OrderExecutor] Binance API: createOrder(BTCUSDT, BUY, 0.01, MARKET)
       [Exchange] Response: orderId=12345, status=FILLED, avgPrice=45023.50
       [StopService] Created stop loss @ 44000 (orderId=12346)
-      [Publisher] Published: orders.events (FILLED)
+      [Publisher] Published: crypto.trader.orders (FILLED)
       [Repository] Persisted order and execution
       [Metrics] orders_executed_total{symbol="BTCUSDT",side="BUY"} +1
 
@@ -899,8 +910,8 @@ flows:
       - step: 5
         component: Event Publisher
         action: |
-          - Publica orders.events (STOP_TRIGGERED)
-          - Publica orders.events (FILLED)
+          - Publica crypto.trader.orders (STOP_TRIGGERED)
+          - Publica crypto.trader.orders (FILLED)
           
       - step: 6
         component: Metrics
@@ -959,7 +970,7 @@ flows:
         
       - step: 8
         component: Event Publisher
-        action: Publica orders.events (REJECTED)
+        action: Publica crypto.trader.orders (REJECTED)
         
       - step: 9
         component: Metrics
@@ -997,9 +1008,9 @@ configuration:
         env: KAFKA_CONSUMER_GROUP
         default: "crypto-trader-group"
       topics:
-        signals_buy: "signals.buy"
-        signals_sell: "signals.sell"
-        orders_events: "orders.events"
+        signals_buy: "crypto.signals.buy"
+        signals_sell: "crypto.signals.sell"
+        orders_events: "crypto.trader.orders"
         
     exchange:
       name:
@@ -1297,7 +1308,7 @@ development_instructions:
         kcat -C -b localhost:9092 -t signals.buy
         
       consume_orders: |
-        kcat -C -b localhost:9092 -t orders.events
+        kcat -C -b localhost:9092 -t crypto.trader.orders
         
     database_queries:
       active_orders: |

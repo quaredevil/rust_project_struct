@@ -24,9 +24,15 @@
       "type": {
         "type": "enum",
         "name": "SignalSource",
-        "symbols": ["INTERNAL", "TRADINGVIEW", "EXTERNAL"]
+        "symbols": ["INTERNAL", "WEBHOOK", "MANUAL"]
       },
-      "doc": "Signal source"
+      "doc": "Signal source: INTERNAL (crypto-signals), WEBHOOK (crypto-webhook), MANUAL (user)"
+    },
+    {
+      "name": "webhook_provider",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Webhook provider name when source=WEBHOOK (e.g., tradingview, alertatron, custom)"
     },
     {
       "name": "confidence",

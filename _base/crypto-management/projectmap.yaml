@@ -62,10 +62,29 @@ architecture:
       description: Consome eventos de múltiplos tópicos
       technology: rdkafka
       topics:
-        - orders.events (crypto-trader)
-        - signals.buy/sell (crypto-signals, crypto-webhook)
-        - crypto-listener.prices (para auto-discovery)
+        - crypto.trader.orders (crypto-trader)
+        - crypto.signals.buy (crypto-signals, crypto-webhook)
+        - crypto.signals.sell (crypto-signals, crypto-webhook)
+        - crypto.listener.prices (para auto-discovery e P&L)
+      note: |
+        Sinais de crypto-webhook agora são publicados nos mesmos tópicos que crypto-signals.
+        Diferenciação via campo source: INTERNAL | WEBHOOK | MANUAL
       concurrency: Multi-threaded tokio tasks
+      
+    balance_manager:
+      description: Gerencia estado de saldo da carteira (Source of Truth)
+      source: User Data Stream (Binance WebSocket)
+      features:
+        - Recebe eventos de balance update em tempo real
+        - Mantém estado atual em Redis (cache) e Postgres (persistência)
+        - Publica eventos de mudança em crypto.management.balance.updated
+        - Suporta reconciliação manual via API polling
+      state: Redis (real-time) + Postgres (persistent)
+      publishes: crypto.management.balance.updated
+      reconciliation:
+        method: Polling periódico da API Binance (fallback)
+        interval: 5 minutes
+        auto_correction: true
       
     position_manager:
       description: Gerencia posições abertas e fechadas
@@ -94,8 +113,8 @@ architecture:
         - Polling de posições (fallback)
         - Reconciliação com ordens conhecidas
       actions:
-        - Emite management.positions.opened
-        - Emite crypto-listener.subscribe
+        - Emite crypto.management.positions.opened
+        - Emite crypto.listener.subscribe
         - Atribui estratégia (se configurado)
         
     strategy_controller:
@@ -105,7 +124,7 @@ architecture:
         - Atualizar parâmetros
         - Atribuir estratégias a symbols
         - Configurar confidence mínima
-      commands: Publica em management.control.strategy
+      commands: Publica em crypto.management.control.strategy
       
     mode_controller:
       description: Controla modo de operação
@@ -113,7 +132,7 @@ architecture:
         - PAPER: simulação completa
         - LIVE: execução real
         - DRY_RUN: valida mas não executa
-      commands: Publica em management.control.mode
+      commands: Publica em crypto.management.control.mode
       
     pnl_calculator:
       description: Calcula P&L em tempo real
@@ -130,8 +149,8 @@ architecture:
         Quando posição é aberta → subscribe no crypto-listener
         Quando posição é fechada → unsubscribe
       topics:
-        - crypto-listener.subscribe
-        - crypto-listener.unsubscribe
+        - crypto.listener.subscribe
+        - crypto.listener.unsubscribe
         
     health_monitor:
       description: Monitora saúde de componentes
@@ -154,12 +173,12 @@ architecture:
     event_publisher:
       description: Publica eventos de gerenciamento
       topics:
-        - management.positions.opened
-        - management.positions.closed
-        - management.positions.updated
-        - management.control.strategy
-        - management.control.risk
-        - management.control.mode
+        - crypto.management.positions.opened
+        - crypto.management.positions.closed
+        - crypto.management.positions.updated
+        - crypto.management.control.strategy
+        - crypto.management.control.risk
+        - crypto.management.control.mode
         
     metrics:
       description: Coleta métricas
@@ -185,7 +204,7 @@ architecture:
 
 kafka_topics:
   consumed:
-    - name: orders.events
+    - name: crypto.trader.orders
       description: Eventos de ordens do crypto-trader
       producer: crypto-trader
       
@@ -200,22 +219,27 @@ kafka_topics:
         - FILLED → Atualizar posição ou criar nova
         - REJECTED → Registrar falha, atualizar métricas
         
-    - name: signals.buy
-      description: Sinais de compra
+    - name: crypto.signals.buy
+      description: |
+        Sinais de compra unificados.
+        Produtores: crypto-signals (source=INTERNAL), crypto-webhook (source=WEBHOOK)
       producers: [crypto-signals, crypto-webhook]
       
       use_case: |
         - Validar contra risk limits
         - Aprovar ou rejeitar
         - Se aprovado: encaminhar para crypto-trader
+        - Diferenciar por source para métricas
         
-    - name: signals.sell
-      description: Sinais de venda
+    - name: crypto.signals.sell
+      description: |
+        Sinais de venda unificados.
+        Produtores: crypto-signals (source=INTERNAL), crypto-webhook (source=WEBHOOK)
       producers: [crypto-signals, crypto-webhook]
       
-      use_case: Similar a signals.buy
+      use_case: Similar a crypto.signals.buy
       
-    - name: crypto-listener.prices
+    - name: crypto.listener.prices
       description: Preços em tempo real (para P&L não realizado)
       producer: crypto-listener
       
@@ -224,7 +248,7 @@ kafka_topics:
         - Detectar quando asset não subscrito ainda tem posição
 
   produced:
-    - name: management.positions.opened
+    - name: crypto.management.positions.opened
       description: Nova posição foi aberta
       consumers: [crypto-signals, crypto-notifications]
       
@@ -250,7 +274,7 @@ kafka_topics:
           "timestamp": "2025-10-16T22:00:00Z"
         }
         
-    - name: management.positions.closed
+    - name: crypto.management.positions.closed
       description: Posição foi fechada
       consumers: [crypto-notifications]
       
@@ -276,7 +300,7 @@ kafka_topics:
           "timestamp": "2025-10-17T00:30:00Z"
         }
         
-    - name: management.positions.updated
+    - name: crypto.management.positions.updated
       description: P&L de posição atualizado
       consumers: [crypto-notifications]
       frequency: Configurável (ex: a cada 1% de variação)
@@ -288,7 +312,36 @@ kafka_topics:
         current_price: number
         pnl_percent: number
         
-    - name: management.control.strategy
+    - name: crypto.management.balance.updated
+      description: Evento de atualização de saldo de um asset
+      consumers: [crypto-notifications]
+      trigger: User Data Stream (Binance) ou reconciliação
+      
+      schema:
+        event_id: UUID
+        asset: string (BTC, USDT, ETH)
+        free: number (saldo disponível)
+        locked: number (saldo em ordens)
+        total: number (free + locked)
+        change_amount: number (variação +/-)
+        change_reason: enum [TRADE, DEPOSIT, WITHDRAWAL, FEE, TRANSFER, UNKNOWN]
+        related_order_id: optional string
+        timestamp: ISO8601
+        
+      example_payload: |
+        {
+          "event_id": "550e8400-e29b-41d4-a716-446655440001",
+          "asset": "USDT",
+          "free": 10000.00,
+          "locked": 500.00,
+          "total": 10500.00,
+          "change_amount": -45.00,
+          "change_reason": "TRADE",
+          "related_order_id": "order_123",
+          "timestamp": "2025-10-16T22:00:00Z"
+        }
+        
+    - name: crypto.management.control.strategy
       description: Comandos de controle de estratégias
       consumers: [crypto-signals, crypto-trader]
       
@@ -309,7 +362,7 @@ kafka_topics:
           }
         }
         
-    - name: management.control.risk
+    - name: crypto.management.control.risk
       description: Atualização de parâmetros de risco
       consumers: [crypto-trader]
       
@@ -320,7 +373,7 @@ kafka_topics:
         max_daily_loss: optional number
         max_drawdown: optional number
         
-    - name: management.control.mode
+    - name: crypto.management.control.mode
       description: Mudança de modo de operação
       consumers: [crypto-trader]
       
@@ -328,7 +381,7 @@ kafka_topics:
         mode: enum [PAPER, LIVE, DRY_RUN]
         timestamp: ISO8601
         
-    - name: crypto-listener.subscribe
+    - name: crypto.listener.subscribe
       description: Solicita subscrição de asset
       consumers: [crypto-listener]
       
@@ -337,7 +390,7 @@ kafka_topics:
         source: enum [position_opened, manual, strategy]
         priority: enum [high, normal]
         
-    - name: crypto-listener.unsubscribe
+    - name: crypto.listener.unsubscribe
       description: Solicita cancelamento de subscrição
       consumers: [crypto-listener]
       
@@ -812,7 +865,7 @@ risk_management:
     description: Validação de sinal contra risk limits
     steps:
       - step: 1
-        action: Receber sinal (signals.buy ou signals.sell)
+        action: Receber sinal (crypto.signals.buy ou crypto.signals.sell)
         
       - step: 2
         action: Verificar modo de operação
@@ -1033,7 +1086,7 @@ flows:
     steps:
       - step: 1
         component: Kafka Consumer
-        action: Consome orders.events (FILLED) de ordem de compra
+        action: Consome crypto.trader.orders (FILLED) de ordem de compra
         
       - step: 2
         component: Order Event Handler
@@ -1071,7 +1124,7 @@ flows:
     steps:
       - step: 1
         component: Kafka Consumer
-        action: Consome orders.events (FILLED) de ordem de venda
+        action: Consome crypto.trader.orders (FILLED) de ordem de venda
         
       - step: 2
         component: Order Event Handler
@@ -1246,9 +1299,9 @@ configuration:
         env: KAFKA_CONSUMER_GROUP
         default: "crypto-management-group"
       topics:
-        orders_events: "orders.events"
-        signals_buy: "signals.buy"
-        signals_sell: "signals.sell"
+        orders_events: "crypto.trader.orders"
+        signals_buy: "crypto.signals.buy"
+        signals_sell: "crypto.signals.sell"
         prices: "crypto-listener.prices"
         
     redis:
@@ -1689,10 +1742,10 @@ troubleshooting:
     - issue: "Posições não aparecendo"
       causes:
         - Ordem não executada
-        - Evento orders.events não recebido
+        - Evento crypto.trader.orders não recebido
         - Erro ao processar evento
       solutions:
-        - Verificar tópico Kafka: kcat -C -b localhost:9092 -t orders.events
+        - Verificar tópico Kafka: kcat -C -b localhost:9092 -t crypto.trader.orders
         - Verificar logs de processamento
         - Verificar database: SELECT * FROM positions
 

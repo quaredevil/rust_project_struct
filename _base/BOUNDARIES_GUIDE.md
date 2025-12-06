@@ -343,7 +343,7 @@ impl SignalService {
     async fn generate_signal(&self) {
         let signal = analyze_market();
         // ✅ CORRETO: Publica no Kafka
-        kafka_producer.send("signals.buy", signal).await;
+        kafka_producer.send("crypto.signals.buy", signal).await;
     }
 }
 
@@ -353,7 +353,7 @@ impl OrderService {
         // ✅ CORRETO: Apenas executa ordem
         let order = self.create_order(signal).await;
         // ✅ CORRETO: Publica evento no Kafka
-        kafka_producer.send("orders.events", order_filled).await;
+        kafka_producer.send("crypto.trader.orders", order_filled).await;
     }
 }
 

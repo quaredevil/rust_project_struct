@@ -20,7 +20,7 @@
   
 ✅ SOLUÇÃO:
   - Gere o sinal com TODOS os dados necessários
-  - Publique em signals.buy ou signals.sell
+  - Publique em crypto.signals.buy ou crypto.signals.sell
   - crypto-trader consome e executa a ordem
 ```
 
@@ -34,7 +34,7 @@
   - Implementar clients de notificação
   
 ✅ SOLUÇÃO:
-  - Publique sinal em signals.buy/sell
+  - Publique sinal em crypto.signals.buy/sell
   - crypto-notifications consome e notifica automaticamente
   - Inclua metadata suficiente no sinal
 ```
@@ -94,7 +94,7 @@
   
 ✅ SOLUÇÃO:
   - crypto-management controla o sistema
-  - Você CONSOME management.control.strategy
+  - Você CONSOME crypto.management.control.strategy
   - Respeite quando uma estratégia é desabilitada
 ```
 
@@ -176,12 +176,12 @@ async fn execute_strategy(candles: &[Candle], strategy: &Strategy) -> Option<Sig
 ```rust
 // ✅ CORRETO
 async fn publish_signal(signal: Signal) {
-    kafka_producer.send("signals.buy", signal).await;
+    kafka_producer.send("crypto.signals.buy", signal).await;
 }
 
 // ❌ ERRADO - Executar ordem após gerar sinal
 async fn publish_and_execute(signal: Signal) {
-    kafka_producer.send("signals.buy", signal).await;
+    kafka_producer.send("crypto.signals.buy", signal).await;
     // ❌ NÃO FAÇA ISSO!
     exchange_client.create_order(signal).await; // ERRADO!
 }
@@ -216,12 +216,12 @@ async fn filter_signal(signal: Signal, filters: &[SignalFilter]) -> Option<Signa
 ## 🔗 Comunicação com Outros Projetos
 
 ### CONSOME (via Kafka):
-- ✅ `crypto-listener.prices` (preços em tempo real)
-- ✅ `management.control.strategy` (comandos para estratégias)
+- ✅ `crypto.listener.prices` (preços em tempo real)
+- ✅ `crypto.management.control.strategy` (comandos para estratégias)
 
 ### PRODUZ (via Kafka):
-- ✅ `signals.buy` (consumido por crypto-trader)
-- ✅ `signals.sell` (consumido por crypto-trader)
+- ✅ `crypto.signals.buy` (consumido por crypto-trader)
+- ✅ `crypto.signals.sell` (consumido por crypto-trader)
 
 ### PROIBIDO:
 - ❌ Chamar APIs de exchange para executar ordens
@@ -281,7 +281,7 @@ async fn full_signal_flow() {
         // 5. Filtrar sinal
         if filter.passes(&signal) {
             // 6. Publicar no Kafka
-            kafka.send("signals.buy", signal).await;
+            kafka.send("crypto.signals.buy", signal).await;
             // ✅ PARE AQUI! Seu trabalho acabou.
             // crypto-trader executa a ordem
             // crypto-notifications envia alertas
@@ -315,7 +315,7 @@ async fn full_signal_flow() {
 ✅ SOLUÇÃO:
   - crypto-signals faz análise técnica
   - crypto-trader APENAS CONSOME sinais já gerados
-  - Tópico Kafka: signals.buy / signals.sell
+  - Tópico Kafka: crypto.signals.buy / crypto.signals.sell
 ```
 
 ### 2. NÃO é um Gerador de Sinais
@@ -343,7 +343,7 @@ async fn full_signal_flow() {
   - Gerenciar templates de mensagens
   
 ✅ SOLUÇÃO:
-  - Publique evento em orders.events
+  - Publique evento em crypto.trader.orders
   - crypto-notifications consome e envia notificações
   - Inclua TODOS os dados necessários no evento
 ```
@@ -377,7 +377,7 @@ async fn full_signal_flow() {
   
 ✅ SOLUÇÃO:
   - crypto-webhook recebe webhooks
-  - crypto-webhook normaliza e publica em signals.buy/sell
+  - crypto-webhook normaliza e publica em crypto.signals.buy/sell
   - crypto-trader consome sinais já normalizados
 ```
 
@@ -391,7 +391,7 @@ async fn full_signal_flow() {
   
 ✅ SOLUÇÃO:
   - crypto-management controla estratégias
-  - Publica em management.control.mode
+  - Publica em crypto.management.control.mode
   - crypto-trader APENAS RESPEITA o modo recebido
 ```
 
@@ -473,7 +473,7 @@ async fn publish_order_filled(order: Order) {
         price: order.average_price,
         // ... todos os dados necessários
     };
-    kafka_producer.send("orders.events", event).await;
+    kafka_producer.send("crypto.trader.orders", event).await;
 }
 ```
 
@@ -498,13 +498,13 @@ async fn calculate_portfolio_risk() {
 ## 🔗 Comunicação com Outros Projetos
 
 ### CONSOME (via Kafka):
-- ✅ `signals.buy` (de crypto-signals, crypto-webhook)
-- ✅ `signals.sell` (de crypto-signals, crypto-webhook)
+- ✅ `crypto.signals.buy` (de crypto-signals, crypto-webhook)
+- ✅ `crypto.signals.sell` (de crypto-signals, crypto-webhook)
 - ✅ `management.control.risk` (de crypto-management)
-- ✅ `management.control.mode` (de crypto-management)
+- ✅ `crypto.management.control.mode` (de crypto-management)
 
 ### PRODUZ (via Kafka):
-- ✅ `orders.events` (consumido por crypto-management, crypto-notifications)
+- ✅ `crypto.trader.orders` (consumido por crypto-management, crypto-notifications)
 
 ### PROIBIDO:
 - ❌ Chamar APIs REST de outros projetos

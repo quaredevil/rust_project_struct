@@ -105,9 +105,12 @@ architecture:
         - IP de origem (opcional)
         
     signal_publisher:
-      description: Publica sinais no Kafka
+      description: Publica sinais no Kafka (unificado com crypto-signals)
       technology: rdkafka
-      topics: [signals.buy, signals.sell]
+      topics: [crypto.signals.buy, crypto.signals.sell]
+      note: |
+        Sinais de webhook são publicados nos mesmos tópicos que crypto-signals
+        usando o campo source=WEBHOOK para diferenciação.
       
     webhook_store:
       description: Armazena histórico de webhooks
@@ -133,8 +136,10 @@ architecture:
 
 kafka_topics:
   produced:
-    - name: signals.buy
-      description: Sinais de compra normalizados de fontes externas
+    - name: crypto.signals.buy
+      description: |
+        Sinais de compra normalizados de fontes externas (webhooks).
+        NOTA: Tópico unificado com crypto-signals. Diferenciação via campo source=WEBHOOK.
       consumers:
         - crypto-trader
         - crypto-management
@@ -151,9 +156,15 @@ kafka_topics:
           examples: ["EXTERNAL_MA_CROSS", "EXTERNAL_RSI_DIVERGENCE"]
           
         source:
+          type: enum
+          description: Origem do sinal (WEBHOOK para este projeto)
+          enum: [INTERNAL, WEBHOOK, MANUAL]
+          value: WEBHOOK
+          
+        webhook_provider:
           type: string
-          description: Fonte do webhook
-          enum: [tradingview, discord_bot, custom, generic]
+          description: Provedor do webhook
+          enum: [tradingview, alertatron, discord_bot, custom, generic]
           
         confidence:
           type: number
@@ -214,9 +225,11 @@ kafka_topics:
           "timestamp": "2025-10-16T22:00:00Z"
         }
 
-    - name: signals.sell
-      description: Sinais de venda
-      schema: Similar ao signals.buy
+    - name: crypto.signals.sell
+      description: |
+        Sinais de venda normalizados de fontes externas (webhooks).
+        NOTA: Tópico unificado com crypto-signals. Diferenciação via campo source=WEBHOOK.
+      schema: Similar ao crypto.signals.buy
 
 
 # ┌─────────────────────────────────────────────────────────────┐
@@ -846,7 +859,7 @@ flows:
       - step: 10
         component: Signal Publisher
         action: |
-          - Publica SignalDTO em signals.buy (Kafka)
+          - Publica SignalDTO em crypto.webhook.signals.buy (Kafka)
           - Serializa para JSON
           
       - step: 11
@@ -965,8 +978,8 @@ configuration:
         env: KAFKA_BROKERS
         default: "localhost:9092"
       topics:
-        signals_buy: "signals.buy"
-        signals_sell: "signals.sell"
+        signals_buy: "crypto.webhook.signals.buy"
+        signals_sell: "crypto.webhook.signals.sell"
       producer_timeout_ms:
         env: KAFKA_PRODUCER_TIMEOUT
         default: 5000
@@ -1230,7 +1243,7 @@ development_instructions:
     verify_signal_published:
       description: Verificar se sinal foi publicado no Kafka
       command: |
-        kcat -C -b localhost:9092 -t signals.buy -o end
+        kcat -C -b localhost:9092 -t crypto.webhook.signals.buy -o end
         
   debugging:
     logs:
@@ -2014,7 +2027,7 @@ domain:
       relevance: "Core domain entity representing trading signal with validation"
     - term: Side
       usage: "Side enum in entities/signal.rs - Buy or Sell variants"
-      relevance: "Determines Kafka topic routing (signals.buy vs signals.sell)"
+      relevance: "Determines Kafka topic routing (crypto.webhook.signals.buy vs crypto.webhook.signals.sell)"
     - term: Webhook
       usage: "Webhook struct in entities/webhook.rs"
       relevance: "Represents external webhook with lifecycle management"

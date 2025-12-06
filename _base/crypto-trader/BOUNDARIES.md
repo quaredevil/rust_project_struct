@@ -20,7 +20,7 @@
 ✅ SOLUÇÃO:
   - crypto-signals faz análise técnica
   - crypto-trader APENAS CONSOME sinais já gerados
-  - Tópico Kafka: signals.buy / signals.sell
+  - Tópico Kafka: crypto.signals.buy / crypto.signals.sell
 ```
 
 ### 2. NÃO é um Gerador de Sinais
@@ -48,7 +48,7 @@
   - Gerenciar templates de mensagens
   
 ✅ SOLUÇÃO:
-  - Publique evento em orders.events
+  - Publique evento em crypto.trader.orders
   - crypto-notifications consome e envia notificações
   - Inclua TODOS os dados necessários no evento
 ```
@@ -82,7 +82,7 @@
   
 ✅ SOLUÇÃO:
   - crypto-webhook recebe webhooks
-  - crypto-webhook normaliza e publica em signals.buy/sell
+  - crypto-webhook normaliza e publica em crypto.signals.buy/sell
   - crypto-trader consome sinais já normalizados
 ```
 
@@ -96,7 +96,7 @@
   
 ✅ SOLUÇÃO:
   - crypto-management controla estratégias
-  - Publica em management.control.mode
+  - Publica em crypto.management.control.mode
   - crypto-trader APENAS RESPEITA o modo recebido
 ```
 
@@ -178,7 +178,7 @@ async fn publish_order_filled(order: Order) {
         price: order.average_price,
         // ... todos os dados necessários
     };
-    kafka_producer.send("orders.events", event).await;
+    kafka_producer.send("crypto.trader.orders", event).await;
 }
 ```
 
@@ -203,13 +203,13 @@ async fn calculate_portfolio_risk() {
 ## 🔗 Comunicação com Outros Projetos
 
 ### CONSOME (via Kafka):
-- ✅ `signals.buy` (de crypto-signals, crypto-webhook)
-- ✅ `signals.sell` (de crypto-signals, crypto-webhook)
-- ✅ `management.control.risk` (de crypto-management)
-- ✅ `management.control.mode` (de crypto-management)
+- ✅ `crypto.signals.buy` (de crypto-signals, crypto-webhook)
+- ✅ `crypto.signals.sell` (de crypto-signals, crypto-webhook)
+- ✅ `crypto.management.control.risk` (de crypto-management)
+- ✅ `crypto.management.control.mode` (de crypto-management)
 
 ### PRODUZ (via Kafka):
-- ✅ `orders.events` (consumido por crypto-management, crypto-notifications)
+- ✅ `crypto.trader.orders` (consumido por crypto-management, crypto-notifications)
 
 ### PROIBIDO:
 - ❌ Chamar APIs REST de outros projetos

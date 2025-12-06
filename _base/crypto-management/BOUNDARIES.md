@@ -125,7 +125,7 @@ async fn track_position(order_filled: OrderFilledEvent) {
     positions_store.update(position).await;
     
     // Publicar evento
-    kafka.send("management.positions.updated", PositionUpdatedEvent {
+    kafka.send("crypto.management.positions.updated", PositionUpdatedEvent {
         position_id: position.id,
         unrealized_pnl: pnl,
         // ...
@@ -143,14 +143,14 @@ async fn detect_manual_trade(user_data: UserDataStreamEvent) {
         let position = create_position_from_manual_trade(user_data);
         
         // Publicar evento
-        kafka.send("management.positions.opened", PositionOpenedEvent {
+        kafka.send("crypto.management.positions.opened", PositionOpenedEvent {
             position_id: position.id,
             source: "manual",
             // ...
         }).await;
         
         // Solicitar subscrição de preços
-        kafka.send("crypto-listener.subscribe", SubscribeEvent {
+        kafka.send("crypto.listener.subscribe", SubscribeEvent {
             symbol: position.symbol,
         }).await;
     }
@@ -222,7 +222,7 @@ async fn enable_strategy(strategy: String, symbols: Vec<String>) {
     strategy_store.enable(&strategy, &symbols).await;
     
     // Publicar comando
-    kafka.send("management.control.strategy", StrategyControlEvent {
+    kafka.send("crypto.management.control.strategy", StrategyControlEvent {
         action: "ENABLE",
         strategy,
         symbols,
@@ -247,7 +247,7 @@ async fn change_mode(mode: OperationMode) {
     system_state.set_mode(mode).await;
     
     // Publicar comando
-    kafka.send("management.control.mode", ModeControlEvent {
+    kafka.send("crypto.management.control.mode", ModeControlEvent {
         mode,
         timestamp: Utc::now(),
     }).await;
@@ -258,7 +258,7 @@ async fn change_mode(mode: OperationMode) {
 ```rust
 // ✅ CORRETO
 async fn subscribe_to_asset(symbol: String, reason: String) {
-    kafka.send("crypto-listener.subscribe", SubscribeEvent {
+    kafka.send("crypto.listener.subscribe", SubscribeEvent {
         symbol,
         source: reason,
         priority: "high",
@@ -268,7 +268,7 @@ async fn subscribe_to_asset(symbol: String, reason: String) {
 async fn unsubscribe_from_asset(symbol: String) {
     // Verificar se ainda há posições abertas
     if !has_open_positions(&symbol).await {
-        kafka.send("crypto-listener.unsubscribe", UnsubscribeEvent {
+        kafka.send("crypto.listener.unsubscribe", UnsubscribeEvent {
             symbol,
             reason: "position_closed",
         }).await;
@@ -281,20 +281,20 @@ async fn unsubscribe_from_asset(symbol: String) {
 ## 🔗 Comunicação com Outros Projetos
 
 ### CONSOME (via Kafka):
-- ✅ `orders.events` (de crypto-trader)
-- ✅ `signals.buy` (de crypto-signals, crypto-webhook)
-- ✅ `signals.sell` (de crypto-signals, crypto-webhook)
-- ✅ `crypto-listener.prices` (para P&L não realizado)
+- ✅ `crypto.trader.orders` (de crypto-trader)
+- ✅ `crypto.signals.buy` (de crypto-signals, crypto-webhook)
+- ✅ `crypto.signals.sell` (de crypto-signals, crypto-webhook)
+- ✅ `crypto.listener.prices` (para P&L não realizado)
 
 ### PRODUZ (via Kafka):
-- ✅ `management.positions.opened` (para crypto-notifications)
-- ✅ `management.positions.closed` (para crypto-notifications)
-- ✅ `management.positions.updated` (para crypto-notifications)
-- ✅ `management.control.strategy` (para crypto-signals, crypto-trader)
-- ✅ `management.control.risk` (para crypto-trader)
-- ✅ `management.control.mode` (para crypto-trader)
-- ✅ `crypto-listener.subscribe` (para crypto-listener)
-- ✅ `crypto-listener.unsubscribe` (para crypto-listener)
+- ✅ `crypto.management.positions.opened` (para crypto-notifications)
+- ✅ `crypto.management.positions.closed` (para crypto-notifications)
+- ✅ `crypto.management.positions.updated` (para crypto-notifications)
+- ✅ `crypto.management.control.strategy` (para crypto-signals, crypto-trader)
+- ✅ `crypto.management.control.risk` (para crypto-trader)
+- ✅ `crypto.management.control.mode` (para crypto-trader)
+- ✅ `crypto.listener.subscribe` (para crypto-listener)
+- ✅ `crypto.listener.unsubscribe` (para crypto-listener)
 
 ### PROIBIDO:
 - ❌ Chamar Exchange API diretamente para executar ordens
@@ -325,14 +325,14 @@ async fn orchestrate_position_opening(order_filled: OrderFilledEvent) {
     let position = create_or_update_position(order_filled).await;
     
     // 2. Publicar evento de posição
-    kafka.send("management.positions.opened", PositionOpenedEvent {
+    kafka.send("crypto.management.positions.opened", PositionOpenedEvent {
         position_id: position.id,
         symbol: position.symbol.clone(),
         // ...
     }).await;
     
     // 3. Solicitar subscrição de preços
-    kafka.send("crypto-listener.subscribe", SubscribeEvent {
+    kafka.send("crypto.listener.subscribe", SubscribeEvent {
         symbol: position.symbol,
         source: "position_opened",
     }).await;
@@ -352,7 +352,7 @@ async fn orchestrate_position_closing(order_filled: OrderFilledEvent) {
     let pnl = calculate_pnl(&position);
     
     // 3. Publicar evento de fechamento
-    kafka.send("management.positions.closed", PositionClosedEvent {
+    kafka.send("crypto.management.positions.closed", PositionClosedEvent {
         position_id: position.id,
         pnl: pnl.total,
         pnl_percent: pnl.percent,
@@ -361,7 +361,7 @@ async fn orchestrate_position_closing(order_filled: OrderFilledEvent) {
     
     // 4. Cancelar subscrição (se não houver outras posições)
     if !has_other_positions(&position.symbol).await {
-        kafka.send("crypto-listener.unsubscribe", UnsubscribeEvent {
+        kafka.send("crypto.listener.unsubscribe", UnsubscribeEvent {
             symbol: position.symbol,
         }).await;
     }
@@ -410,13 +410,13 @@ async fn check_if_should_close_position(position: &Position) {
 ```rust
 async fn handle_risk_violation(portfolio: &Portfolio) {
     // ✅ Publicar comando de parada emergencial
-    kafka.send("management.control.risk", RiskControlEvent {
+    kafka.send("crypto.management.control.risk", RiskControlEvent {
         action: "HALT_TRADING",
         reason: "Max drawdown exceeded",
     }).await;
     
     // ✅ Publicar alerta
-    kafka.send("management.alerts", AlertEvent {
+    kafka.send("crypto.management.alerts", AlertEvent {
         severity: "critical",
         message: "Trading halted due to risk violation",
     }).await;

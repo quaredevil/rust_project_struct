@@ -18,7 +18,7 @@
   
 ✅ SOLUÇÃO:
   - Você APENAS notifica sobre ordens já executadas
-  - Consome events de orders.events
+  - Consome events de crypto.trader.orders
   - NÃO toma decisões sobre ordens
 ```
 
@@ -123,11 +123,11 @@ Pergunte-se:
 // ✅ CORRETO
 async fn consume_events() {
     let consumer = KafkaConsumer::new(&[
-        "orders.events",
-        "signals.buy",
-        "signals.sell",
-        "management.positions.opened",
-        "management.positions.closed",
+        "crypto.trader.orders",
+        "crypto.signals.buy",
+        "crypto.signals.sell",
+        "crypto.management.positions.opened",
+        "crypto.management.positions.closed",
     ]);
     
     while let Some(event) = consumer.next().await {
@@ -227,12 +227,12 @@ async fn should_notify(event: Event) -> bool {
 ## 🔗 Comunicação com Outros Projetos
 
 ### CONSOME (via Kafka):
-- ✅ `orders.events` (de crypto-trader)
-- ✅ `signals.buy` (de crypto-signals, crypto-webhook)
-- ✅ `signals.sell` (de crypto-signals, crypto-webhook)
-- ✅ `management.positions.opened` (de crypto-management)
-- ✅ `management.positions.closed` (de crypto-management)
-- ✅ `management.positions.updated` (de crypto-management)
+- ✅ `crypto.trader.orders` (de crypto-trader)
+- ✅ `crypto.signals.buy` (de crypto-signals, crypto-webhook)
+- ✅ `crypto.signals.sell` (de crypto-signals, crypto-webhook)
+- ✅ `crypto.management.positions.opened` (de crypto-management)
+- ✅ `crypto.management.positions.closed` (de crypto-management)
+- ✅ `crypto.management.positions.updated` (de crypto-management)
 
 ### PRODUZ (via Kafka):
 - ✅ `notifications.delivered` (para auditoria)

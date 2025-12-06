@@ -9,7 +9,7 @@ project:
     Consumes WebSocket streams from Binance, filters price updates, and publishes to Kafka.
     Built with clean architecture principles for testability and extensibility.
     Kafka is the core messaging infrastructure - all price updates flow directly to Kafka topics.
-    All Kafka topics follow naming pattern: crypto-listener-{topic-name}
+    All Kafka topics follow naming pattern: crypto.listener.{recurso}
 
   features:
     default: []
@@ -20,7 +20,51 @@ project:
   web_framework: "Axum 0.8.6"
   database: "PostgreSQL (used only for subscription persistence)"
   messaging: "Kafka (always enabled, JSON serialization)"
+  cache: "Redis (required for leader election)"
   observability: "tracing + tracing-subscriber (structured JSON logs)"
+
+  # ┌─────────────────────────────────────────────────────────────┐
+  # │ SCALING: Leader Election para evitar duplicidade            │
+  # └─────────────────────────────────────────────────────────────┘
+  scaling:
+    strategy: leader_election
+    
+    leader_election:
+      description: |
+        Apenas o pod líder conecta ao WebSocket da Binance.
+        Demais pods ficam em standby para failover automático.
+        Isso evita mensagens duplicadas no Kafka quando múltiplas
+        instâncias estão rodando.
+        
+      technology: Redis
+      lock_key: "crypto-listener:leader"
+      lock_ttl: 30s
+      heartbeat_interval: 10s
+      
+      behavior:
+        on_leader_acquired: |
+          1. Conectar ao Binance WebSocket
+          2. Subscrever nos símbolos ativos (do banco de dados)
+          3. Começar a publicar em crypto.listener.prices
+          
+        on_leader_lost: |
+          1. Desconectar do WebSocket gracefully
+          2. Entrar em modo standby
+          3. Tentar reacquire lock periodicamente
+          
+        failover_time: "~30s (tempo do TTL expirar)"
+        
+    asset_distribution:
+      description: |
+        Quando um pod é líder, ele gerencia TODOS os assets ativos.
+        Escalabilidade horizontal é via failover, não via sharding.
+        
+      future_enhancement: |
+        Para alta escala (1000+ symbols), considerar:
+        - Particionamento por hash do symbol
+        - Múltiplos grupos de líderes
+        - Cada grupo responsável por subset de symbols
+        - Escalonamento baseado em CPU/memória
 
   documentation:
     location: "docs/"
@@ -35,23 +79,23 @@ project:
 
     existing_files:
       - name: KAFKA_TOPICS_MIGRATION.md
-        purpose: "Guide for migrating to new Kafka topic naming pattern (crypto-listener-{topic-name})"
+        purpose: "Guide for migrating to new Kafka topic naming pattern (crypto.listener.{recurso})"
         created: "2025-10-16"
         category: migration
 
   kafka_topics:
-    - name: crypto-listener-prices
+    - name: crypto.listener.prices
       description: "Price update events from market data stream"
       message_type: PriceUpdate
       env_var: KAFKA_TOPIC_PRICES
-    - name: crypto-listener-subscription-commands
+    - name: crypto.listener.subscribe
       description: "Commands to subscribe to market data symbols"
       message_type: SubscribeCommand
-      env_var: KAFKA_TOPIC_SUBSCRIPTION_COMMANDS
-    - name: crypto-listener-unsubscription-commands
+      env_var: KAFKA_TOPIC_SUBSCRIBE
+    - name: crypto.listener.unsubscribe
       description: "Commands to unsubscribe from market data symbols"
       message_type: UnsubscribeCommand
-      env_var: KAFKA_TOPIC_UNSUBSCRIPTION_COMMANDS
+      env_var: KAFKA_TOPIC_UNSUBSCRIBE
 
 naming_style: snake_case
 
@@ -336,7 +380,7 @@ infrastructure:
     Kafka, PostgreSQL for subscriptions only). Contains all I/O and framework-specific code.
     Price updates flow directly from Binance to Kafka without database persistence.
     Also includes bootstrap, startup, and shutdown modules for application lifecycle management.
-    All Kafka topics follow the naming pattern: crypto-listener-{topic-name}
+    All Kafka topics follow the naming pattern: crypto.listener.{recurso}
 
   naming_style: snake_case
 
@@ -622,7 +666,7 @@ infrastructure:
       features:
         - "Environment-based configuration loading"
         - "Nested configuration structures"
-        - "Support for multiple Kafka topics with naming pattern: crypto-listener-{topic-name}"
+        - "Support for multiple Kafka topics with naming pattern: crypto.listener.{recurso}"
         - "Support for multiple Kafka producers/consumers"
         - "Validation on load"
         - "TopicsConfig centralizes all Kafka topic names"
@@ -644,7 +688,7 @@ infrastructure:
     - "Bootstrap modules handle all initialization with retry logic and fallbacks"
     - "Startup modules provide observability and user feedback"
     - "Shutdown modules ensure graceful resource cleanup"
-    - "All Kafka topics follow naming pattern: crypto-listener-{topic-name}"
+    - "All Kafka topics follow naming pattern: crypto.listener.{recurso}"
     - "TopicsConfig provides centralized topic name management"
 
   patterns:
@@ -783,7 +827,7 @@ infrastructure:
       note: "Graceful shutdown with flush prevents data loss during restarts"
       priority: high
     - category: naming
-      note: "All Kafka topics follow pattern crypto-listener-{topic-name} for namespace isolation"
+      note: "All Kafka topics follow pattern crypto.listener.{recurso} for namespace isolation"
       priority: high
     - category: configuration
       note: "Multiple topics supported via KAFKA_TOPIC_* environment variables and TopicsConfig struct"
@@ -1628,7 +1672,7 @@ api_contracts:
     cluster: crypto-listener-cluster
     bootstrap_servers: ["kafka:9092"]
     
-    naming_convention: "crypto-listener-{topic-name}"
+    naming_convention: "crypto.listener.{recurso}"
     
     default_config:
       partitions: 3
@@ -1643,7 +1687,7 @@ api_contracts:
 
     # ── TOPICS PUBLISHED (Producer) ─────────────────────
     topics_published:
-      - topic: crypto-listener-prices
+      - topic: crypto.listener.prices
         description: "Real-time price updates from Binance market data"
         owner_module: infrastructure::messaging::kafka_price_publisher
         
@@ -1683,7 +1727,7 @@ api_contracts:
             consumer_group: alerting-prices
             purpose: "Price alert triggers"
 
-      - topic: crypto-listener-subscription-commands
+      - topic: crypto.listener.subscribe
         description: "Commands to subscribe to market data symbols"
         owner_module: application::dtos::commands::SubscribeCommand
         
@@ -1715,7 +1759,7 @@ api_contracts:
             consumer_group: listener-subscription-handler
             purpose: "Process subscription commands"
 
-      - topic: crypto-listener-unsubscription-commands
+      - topic: crypto.listener.unsubscribe
         description: "Commands to unsubscribe from market data symbols"
         owner_module: application::dtos::commands::UnsubscribeCommand
         
@@ -1758,7 +1802,7 @@ api_contracts:
         critical_threshold: 10000
         
       throughput_baseline:
-        crypto-listener-prices: "Varies by market activity"
+        crypto.listener.prices: "Varies by market activity"
 
 # ============================================================
 # DATA AND MODELS MAP
@@ -1822,7 +1866,7 @@ data_model:
     - name: SubscribeCommand
       layer: application
       purpose: "Kafka command message for subscription"
-      source: Kafka topic crypto-listener-subscription-commands
+      source: Kafka topic crypto.listener.subscribe
       target: MarketDataStreamPort
       mappings:
         - from: kafka.symbol
@@ -1837,7 +1881,7 @@ data_model:
     - name: UnsubscribeCommand
       layer: application
       purpose: "Kafka command message for unsubscription"
-      source: Kafka topic crypto-listener-unsubscription-commands
+      source: Kafka topic crypto.listener.unsubscribe
       target: MarketDataStreamPort
       mappings:
         - from: kafka.symbol

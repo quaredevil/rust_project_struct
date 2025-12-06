@@ -19,7 +19,7 @@
 ✅ SOLUÇÃO:
   - Receba webhook
   - Normalize payload
-  - Publique sinal em signals.buy/sell
+  - Publique sinal em crypto.webhook.signals.buy/sell
   - crypto-trader consome e executa
 ```
 
@@ -234,8 +234,8 @@ async fn check_replay(request_signature: &str) -> Result<(), ReplayError> {
 // ✅ CORRETO
 async fn publish_signal(signal: Signal) -> Result<(), KafkaError> {
     let topic = match signal.side {
-        Side::Buy => "signals.buy",
-        Side::Sell => "signals.sell",
+        Side::Buy => "crypto.webhook.signals.buy",
+        Side::Sell => "crypto.webhook.signals.sell",
     };
     
     kafka_producer.send(topic, &signal).await
@@ -250,8 +250,8 @@ async fn publish_signal(signal: Signal) -> Result<(), KafkaError> {
 - ✅ Nenhum (é ponto de entrada HTTP)
 
 ### PRODUZ (via Kafka):
-- ✅ `signals.buy` (consumido por crypto-trader)
-- ✅ `signals.sell` (consumido por crypto-trader)
+- ✅ `crypto.webhook.signals.buy` (consumido por crypto-trader)
+- ✅ `crypto.webhook.signals.sell` (consumido por crypto-trader)
 - ✅ `webhooks.audit` (opcional, para auditoria)
 
 ### PROIBIDO:
@@ -419,7 +419,7 @@ async fn normalize_tradingview(tv: TradingViewPayload) -> Signal {
   
 ✅ SOLUÇÃO:
   - Você APENAS notifica sobre ordens já executadas
-  - Consome events de orders.events
+  - Consome events de crypto.trader.orders
   - NÃO toma decisões sobre ordens
 ```
 
@@ -524,11 +524,11 @@ Pergunte-se:
 // ✅ CORRETO
 async fn consume_events() {
     let consumer = KafkaConsumer::new(&[
-        "orders.events",
-        "signals.buy",
-        "signals.sell",
-        "management.positions.opened",
-        "management.positions.closed",
+        "crypto.trader.orders",
+        "crypto.webhook.signals.buy",
+        "crypto.webhook.signals.sell",
+        "crypto.management.positions.opened",
+        "crypto.management.positions.closed",
     ]);
     
     while let Some(event) = consumer.next().await {
@@ -628,12 +628,12 @@ async fn should_notify(event: Event) -> bool {
 ## 🔗 Comunicação com Outros Projetos
 
 ### CONSOME (via Kafka):
-- ✅ `orders.events` (de crypto-trader)
-- ✅ `signals.buy` (de crypto-signals, crypto-webhook)
-- ✅ `signals.sell` (de crypto-signals, crypto-webhook)
-- ✅ `management.positions.opened` (de crypto-management)
-- ✅ `management.positions.closed` (de crypto-management)
-- ✅ `management.positions.updated` (de crypto-management)
+- ✅ `crypto.trader.orders` (de crypto-trader)
+- ✅ `crypto.webhook.signals.buy` (de crypto-signals, crypto-webhook)
+- ✅ `crypto.webhook.signals.sell` (de crypto-signals, crypto-webhook)
+- ✅ `crypto.management.positions.opened` (de crypto-management)
+- ✅ `crypto.management.positions.closed` (de crypto-management)
+- ✅ `crypto.management.positions.updated` (de crypto-management)
 
 ### PRODUZ (via Kafka):
 - ✅ `notifications.delivered` (para auditoria)

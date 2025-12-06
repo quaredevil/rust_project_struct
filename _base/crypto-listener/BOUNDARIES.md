@@ -143,7 +143,7 @@
 **Solução correta:**
 ```rust
 // ✅ Se preciso notificar algo
-kafka.send("notifications.send", NotificationRequest {
+kafka.send("crypto.notifications.send", NotificationRequest {
     channel: "telegram",
     message: "Listener conectado",
     priority: "low",
@@ -304,7 +304,7 @@ impl SubscriptionManager {
         self.websocket.add_symbol(&cmd.symbol, &cmd.intervals).await?;
         
         // ✅ CORRETO: Notifica via Kafka (não diretamente)
-        self.kafka.send("notifications.send", NotificationRequest {
+        self.kafka.send("crypto.notifications.send", NotificationRequest {
             message: format!("Agora monitorando {}", cmd.symbol),
             priority: "info",
         }).await?;
@@ -326,7 +326,7 @@ impl BinanceWebSocketClient {
         
         if rsi < 30 {  // ERRADO!
             // ❌ Gerando sinal (responsabilidade do crypto-signals)
-            self.kafka.send("signals.buy", signal).await;  // ERRADO!
+            self.kafka.send("crypto.signals.buy", signal).await;  // ERRADO!
         }
         
         // ❌ Enviando notificação direta (responsabilidade do crypto-notifications)
@@ -376,7 +376,7 @@ Antes de implementar, pergunte-se:
 
 ### 5. Estou enviando mensagens diretamente (Telegram, etc.)?
 ```
-❌ SIM → PARE! Use Kafka para notifications.send
+❌ SIM → PARE! Use Kafka para crypto.notifications.send
 ✅ NÃO → Continue
 ```
 
@@ -434,7 +434,7 @@ crypto-signals  crypto-management
 **OK**, mas via Kafka:
 ```rust
 // ✅ CORRETO
-kafka.send("notifications.send", NotificationRequest { ... }).await;
+kafka.send("crypto.notifications.send", NotificationRequest { ... }).await;
 
 // ❌ ERRADO
 telegram.send("Conectado!").await;
